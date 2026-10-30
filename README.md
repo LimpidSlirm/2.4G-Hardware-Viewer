@@ -217,6 +217,23 @@ Strength usage was present. Because the current evidence does not identify a
 battery byte, the application does not send an output report or vendor command
 to this mouse and continues to show its battery as undisclosed.
 
+## Mouse battery report
+
+The current mouse (`24AE:1411`, Rapoo Gaming Device) uses a different protocol
+from the reference screenshot's `373B:1216` command protocol. It passively
+sends Input Report 7 on its HID mouse interface. A captured report was:
+
+```text
+[7, 16, 3, 64, 6, 64, 6, 1, 99, 0, 2, 2, 0]
+```
+
+For this device, byte `[7]` is the observed charging-state field and byte
+`[8]` is the battery percentage. The application now listens for this report
+without sending an Output or Feature Report and records the observed value
+(`99%` in the verification sample). The mouse may be asleep and emit no
+report until it is moved; no report is treated as an unknown value, not as
+0%.
+
 ## Headset connection test
 
 After connecting the HUAWEI FreeBuds SE 2, Windows enumerated the Bluetooth
