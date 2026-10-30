@@ -15,7 +15,8 @@ Windows 桌面浮层工具，实时查看已连接的 2.4G / USB / 蓝牙外设�
 - 无电量的设备明确标注 `电量未公开`，不猜测、不伪造百分比
 - 每行显示状态圆点、设备名、VID:PID 与数据来源
 - 点击设备行展开详情，再次点击收起；不点击时不占用空间
-- 鼠标休眠时不广播报告，界面沿用最后一次有效读数并标注 `缓存 HH:MM`
+- 键盘与鼠标都采用被动监听，设备静默时沿用最后一次有效读数并标注时间
+- 键盘电量抖动约 ±4，取最近 5 次读数的中位数平滑，显示比官方网页驱动更稳定
 - 每 5 分钟自动刷新，也可随时手动刷新
 - 过滤笔记本内置 ACPI/PS-2 键盘、内置麦克风阵列与内置触摸板
 - 窗口高度随内容自适应，最大不超过屏幕可用高度
@@ -56,9 +57,14 @@ HKCU\Software\Microsoft\Windows\CurrentVersion\Run
 | 语言 | Python 3.13 |
 | 界面 | PySide6（Qt 6） |
 | 设备枚举 | Windows PowerShell `Get-PnpDevice` |
-| 厂商电量协议 | `pywinusb`（HID 只读） |
-| HID 诊断 | `ctypes` 直调 `hid.dll` / `setupapi.dll` |
+| 被动报文监听 | `ctypes` 直调 `kernel32.ReadFile`（阻塞读，独立线程） |
+| Feature Report | `pywinusb`（只读） |
+| HID 枚举 | `ctypes` 直调 `hid.dll` / `setupapi.dll` |
+| 全局快捷键 | `ctypes` 直调 `user32.RegisterHotKey` |
+| 开机自启 | `winreg` 读写当前用户 `Run` 项 |
 | 预留扩展 | `pyserial`（串口型设备） |
+
+> 被动监听不能用 `pywinusb` 的回调：它依赖 Windows 消息循环，而 Qt 事件循环占用了主线程后回调不会触发，因此改用独立线程里的阻塞 `ReadFile`。
 
 ## 模块结构
 
@@ -125,6 +131,7 @@ requirements.txt
 DeviceDiscoveryThread (QThread)
         │  discover_devices()        → PowerShell → PnP 设备列表
         │  read_vendor_battery_candidates() → 3554:FA09 Feature Report 6
+        │  read_keyboard_battery()   → 0C45:FEFE 类型 0x10 广播 [26]（中位数）
         │  read_mouse_battery()      → 24AE:1411 Input Report 7
         │  _merge_by_device()        → 按 VID:PID 合并各 HID 集合
         ▼
@@ -132,6 +139,19 @@ list[DeviceRecord] ──Qt 信号──► OverlayWindow
         │
         ▼
 分组渲染 DeviceRow → 电量条 / 详情面板
+```
+
+被动监听器在程序启动时拉起独立线程，与刷新线程解耦：
+
+```text
+start_mouse_listener()     → 24AE:1411 0xFF00/0x02 阻塞读
+start_keyboard_listener()  → 0C45:FEFE 0xFF60/0x61 阻塞读
+        │
+        ▼
+进程内缓存 + .mouse_battery_cache.json
+        │
+        ▼
+刷新时直接读取缓存，无需等待设备再次广播
 ```
 
 ## 已支持的设备协议
@@ -198,7 +218,10 @@ pywinusb
 - 外设电量取决于设备是否暴露只读报告；Windows 通用 PnP 属性中的 `PowerData` 属于电源管理元数据，不能当作电量
 - 蓝牙耳机（如 HUAWEI FreeBuds SE 2）与普通 USB 音频设备目前读不到电量，Windows 设置中的合并电量未通过标准接口公开
 - 鼠标休眠时不发送报告，此时沿用最后一次有效读数并标注 `缓存 HH:MM`；超过 24 小时未更新则回退为无读数，不会误报 `0%`
-- 电量缓存只保存在进程内存中，程序重启后需要一次新的广播才能恢复读数（移动鼠标即可触发）
+- 键盘的厂商广播是突发式的，空闲时可能静默数分钟，同样依赖缓存显示
+- 读数缓存写入项目根目录的 `.mouse_battery_cache.json`（已在 `.gitignore` 中排除），重启后可立即恢复上次读数
+- 键盘电量的原始字段抖动约 ±4，中位数平滑会让数值变化略滞后于真实电量
 - 键盘报告的三个候选字节尚未逐字节独立验证，界面标注为“候选”
-- 不解析 2.4G 空中数据包，也不逆向未知设备协议
-- 全程只读：不发送 Output Report 或 Feature Report 写命令，不读取键盘按键内容或鼠标移动轨迹
+- 不解析 2.4G 空中数据包
+- 程序正式代码全程只读：不发送 Output Report 或 Feature Report 写命令，不读取键盘按键内容或鼠标移动轨迹
+- 逆向阶段曾用临时脚本向设备发过探测包（含全零包与 VIA 标准查询），这些脚本未进入代码库，详见开发日志
