@@ -122,3 +122,19 @@ overlay instead of expanding the window horizontally.
 The overlay supports `F5` for an immediate refresh. `Ctrl+Up` and `Ctrl+Down`
 increase or decrease opacity between 35% and 100%; `Esc` closes the window.
 The panel displays the most recent refresh time and current opacity.
+
+## Battery readings
+
+The discovery query also checks the Windows ACPI battery. Peripheral battery
+levels are shown as `未知（Windows 未公开）` unless Windows exposes a
+device-specific battery value; the application does not infer a percentage
+from connection or power-management data. On the development computer, the
+system battery reports 100%, while the connected headset, keyboard, and mouse
+do not currently expose a percentage through the tested generic PnP properties.
+
+The reference project
+[`2.4G-battery-viewer`](https://github.com/yszyszysz233/2.4G-battery-viewer)
+uses device-specific HID protocols for VID:PID `373B:1216` and `3654:6901`.
+The development computer currently exposes `3554:FA09` and `24AE:1411` for
+its HID keyboard/mouse devices, and the headset appears as a Bluetooth device,
+so those reference commands are not applied automatically.

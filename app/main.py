@@ -218,19 +218,39 @@ class OverlayWindow(QWidget):
             )
             for device in category_devices:
                 color = "#a7e3b1" if device.status.upper() == "OK" else "#ffb4ab"
+                battery = (
+                    f"  电量：{device.battery_percent}%"
+                    if device.battery_percent is not None
+                    else "  电量：未知（Windows 未公开）"
+                )
                 label = DeviceLabel(
                     device,
-                    f"  {device.name}  ·  {device.status}",
+                    f"  {device.name}  ·  {device.status}\n{battery}",
                     f"color: {color}; font-size: 11px;",
                 )
                 label.setToolTip(f"Windows 实例 ID：\n{device.instance_id}")
                 label.clicked.connect(self._show_device_details)
                 self._device_layout.addWidget(label)
 
+        battery_devices = [
+            device for device in devices if device.category == "本机电池"
+        ]
+        if battery_devices:
+            self._add_device_label(
+                "本机电池",
+                "color: #91c8ff; font-weight: 600;",
+            )
+            for device in battery_devices:
+                self._add_device_label(
+                    f"  {device.name}  ·  电量：{device.battery_percent}%",
+                    "color: #a7e3b1; font-size: 11px;",
+                )
+
     def _show_device_details(self, device: DeviceRecord) -> None:
         self._selected_device.setText(
             f"选中：{device.name}\n"
             f"类别：{device.category}  |  状态：{device.status}\n"
+            f"电量：{device.battery_percent if device.battery_percent is not None else '未知（Windows 未公开）'}\n"
             f"实例 ID：{device.instance_id.replace('\\\\', '\\\\\u200b')}"
         )
 

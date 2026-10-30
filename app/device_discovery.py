@@ -12,6 +12,7 @@ class DeviceRecord:
     name: str
     status: str
     instance_id: str
+    battery_percent: int | None = None
 
 
 class DeviceDiscoveryError(RuntimeError):
@@ -23,7 +24,12 @@ $classes = @('AudioEndpoint', 'Keyboard', 'Mouse')
 $devices = Get-PnpDevice -PresentOnly |
     Where-Object { $_.Class -in $classes } |
     Select-Object Status, Class, FriendlyName, InstanceId
-ConvertTo-Json -InputObject @($devices) -Compress
+$battery = Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue |
+    Select-Object Name, Status, EstimatedChargeRemaining, EstimatedRunTime
+[PSCustomObject]@{
+    Devices = @($devices)
+    Batteries = @($battery)
+} | ConvertTo-Json -Compress
 """
 
 
@@ -36,11 +42,11 @@ def _category_for_class(device_class: str) -> str:
 
 
 def _records_from_json(payload: Any) -> list[DeviceRecord]:
-    if not isinstance(payload, list):
+    if not isinstance(payload, dict) or not isinstance(payload.get("Devices"), list):
         raise DeviceDiscoveryError("Windows returned an unexpected device list.")
 
     records: list[DeviceRecord] = []
-    for item in payload:
+    for item in payload["Devices"]:
         if not isinstance(item, dict):
             continue
         device_class = str(item.get("Class") or "")
@@ -57,6 +63,20 @@ def _records_from_json(payload: Any) -> list[DeviceRecord]:
                 )
             )
     return records
+
+
+def _battery_from_json(payload: Any) -> int | None:
+    batteries = payload.get("Batteries") if isinstance(payload, dict) else None
+    if not isinstance(batteries, list):
+        return None
+    levels = [
+        item.get("EstimatedChargeRemaining")
+        for item in batteries
+        if isinstance(item, dict)
+        and isinstance(item.get("EstimatedChargeRemaining"), int)
+        and 0 <= item["EstimatedChargeRemaining"] <= 100
+    ]
+    return min(levels) if levels else None
 
 
 def discover_devices() -> list[DeviceRecord]:
@@ -89,4 +109,16 @@ def discover_devices() -> list[DeviceRecord]:
         payload = json.loads(completed.stdout or "[]")
     except json.JSONDecodeError as exc:
         raise DeviceDiscoveryError("Windows returned invalid device data.") from exc
-    return _records_from_json(payload)
+    devices = _records_from_json(payload)
+    battery_percent = _battery_from_json(payload)
+    if battery_percent is not None:
+        devices.append(
+            DeviceRecord(
+                category="本机电池",
+                name="Windows ACPI 电池",
+                status="OK",
+                instance_id="system-battery",
+                battery_percent=battery_percent,
+            )
+        )
+    return devices
