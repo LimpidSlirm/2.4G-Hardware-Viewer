@@ -20,7 +20,12 @@ from PySide6.QtWidgets import (
 )
 
 from .autostart import install_autostart, remove_autostart
-from .battery_protocols import read_mouse_battery, read_vendor_battery_candidates
+from .battery_protocols import (
+    read_mouse_battery,
+    read_vendor_battery_candidates,
+    start_mouse_listener,
+    stop_mouse_listener,
+)
 from .device_discovery import DeviceDiscoveryError, DeviceRecord, discover_devices
 from .hotkey import MOD_ALT, MOD_CONTROL, GlobalHotkey
 
@@ -102,7 +107,7 @@ def _merge_by_device(
         categories = {member.category for member in members}
         readings: list[tuple[str, int, str]] = []
         if keyboard is not None and primary.vid_pid == keyboard[0] and "键盘" in categories:
-            readings.append(("键盘", keyboard[1], "厂商 HID 报告（候选）"))
+            readings.append(("键盘", keyboard[1], "厂商 HID 报告"))
         if mouse is not None and primary.vid_pid == mouse[0]:
             readings.append(("鼠标", mouse[1], mouse[2]))
         primary_category = primary.category
@@ -732,6 +737,7 @@ def main() -> int:
 
     app = QApplication(sys.argv)
     window = OverlayWindow()
+    start_mouse_listener()
     available_geometry = app.primaryScreen().availableGeometry()
     position = available_geometry.topLeft() + QPoint(40, 40)
     window.move(position)
@@ -748,7 +754,9 @@ def main() -> int:
         else:
             QTimer.singleShot(100, app.quit)
 
-    return app.exec()
+    exit_code = app.exec()
+    stop_mouse_listener()
+    return exit_code
 
 
 if __name__ == "__main__":
