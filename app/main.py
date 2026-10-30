@@ -45,38 +45,75 @@ def _status_color(status: str) -> str:
     return RED_COLOR
 
 
-def _source_text(device: DeviceRecord) -> str:
-    return device.battery_source or device.transport
+def _meta_text(device: DeviceRecord, readings: tuple[tuple[str, int, str], ...]) -> str:
+    if not readings:
+        return "电量未公开"
+    sources = list(dict.fromkeys(source for _label, _percent, source in readings))
+    return " / ".join(sources)
 
 
-def _attach_battery(
+def _merged_name(
+    member: DeviceRecord,
+    categories: set[str],
+    roles: set[str],
+) -> str:
+    if member.category == "音频设备":
+        return member.name
+    if roles == {"键盘", "鼠标"}:
+        return "无线键鼠接收器"
+    if roles == {"键盘"}:
+        return "无线键盘"
+    if roles == {"鼠标"}:
+        return "无线鼠标"
+    if {"键盘", "鼠标"} <= categories:
+        return "无线键鼠接收器"
+    if "键盘" in categories:
+        return "无线键盘"
+    return "无线鼠标"
+
+
+def _merge_by_device(
     devices: list[DeviceRecord],
-    category: str,
-    vid_pid: str,
-    battery_percent: int,
-    source: str,
-) -> tuple[list[DeviceRecord], bool]:
-    """Attach a reading to the matching device row instead of adding a new one."""
-    updated: list[DeviceRecord] = []
-    matched = False
+    keyboard: tuple[str, int] | None,
+    mouse: tuple[str, int] | None,
+) -> list[DeviceRecord]:
+    """Collapse every HID collection of one physical device into a single row."""
+    groups: dict[str, list[DeviceRecord]] = {}
     for device in devices:
-        if (
-            not matched
-            and device.category == category
-            and device.vid_pid == vid_pid
-            and device.battery_percent is None
-        ):
-            updated.append(
-                replace(
-                    device,
-                    battery_percent=battery_percent,
-                    battery_source=source,
-                )
+        key = device.vid_pid or f"{device.category}|{device.name}"
+        groups.setdefault(key, []).append(device)
+
+    merged: list[DeviceRecord] = []
+    for members in groups.values():
+        first = members[0]
+        categories = {member.category for member in members}
+        readings: list[tuple[str, int, str]] = []
+        if keyboard is not None and first.vid_pid == keyboard[0] and "键盘" in categories:
+            readings.append(("键盘", keyboard[1], "厂商 HID 报告（候选）"))
+        if mouse is not None and first.vid_pid == mouse[0]:
+            readings.append(("鼠标", mouse[1], "厂商 HID 报告"))
+        roles = {reading[0] for reading in readings}
+        if "键盘" in roles:
+            category = "键盘"
+        elif "鼠标" in roles:
+            category = "鼠标"
+        elif "键盘" in categories:
+            category = "键盘"
+        elif "鼠标" in categories:
+            category = "鼠标"
+        else:
+            category = first.category
+        merged.append(
+            replace(
+                first,
+                category=category,
+                name=_merged_name(first, categories, roles),
+                battery_percent=readings[0][1] if readings else None,
+                battery_source=readings[0][2] if readings else None,
+                battery_readings=tuple(readings),
             )
-            matched = True
-            continue
-        updated.append(device)
-    return updated, matched
+        )
+    return merged
 
 
 
@@ -87,47 +124,21 @@ class DeviceDiscoveryThread(QThread):
     def run(self) -> None:
         try:
             devices = discover_devices()
+            keyboard: tuple[str, int] | None = None
             for reading in read_vendor_battery_candidates():
-                devices, matched = _attach_battery(
-                    devices,
-                    category="键盘",
-                    vid_pid=f"{reading.vendor_id:04X}:{reading.product_id:04X}",
-                    battery_percent=reading.values[0],
-                    source="厂商 HID 报告（候选）",
+                keyboard = (
+                    f"{reading.vendor_id:04X}:{reading.product_id:04X}",
+                    reading.values[0],
                 )
-                if not matched:
-                    devices.append(
-                        DeviceRecord(
-                            category="键盘",
-                            name="无线键盘",
-                            status="候选",
-                            instance_id="vendor-feature-report",
-                            battery_percent=reading.values[0],
-                            battery_source="厂商 HID 报告（候选）",
-                        )
-                    )
+                break
             mouse_status = read_mouse_battery()
+            mouse: tuple[str, int] | None = None
             if mouse_status is not None:
-                devices, matched = _attach_battery(
-                    devices,
-                    category="鼠标",
-                    vid_pid=f"{mouse_status.vendor_id:04X}:"
-                    f"{mouse_status.product_id:04X}",
-                    battery_percent=mouse_status.battery_percent,
-                    source=f"厂商 HID 报告 · {mouse_status.dpi_x} DPI",
+                mouse = (
+                    f"{mouse_status.vendor_id:04X}:{mouse_status.product_id:04X}",
+                    mouse_status.battery_percent,
                 )
-                if not matched:
-                    devices.append(
-                        DeviceRecord(
-                            category="鼠标",
-                            name=f"无线鼠标（{mouse_status.dpi_x} DPI）",
-                            status="已读取",
-                            instance_id="mouse-input-report",
-                            battery_percent=mouse_status.battery_percent,
-                            battery_source="厂商 HID 报告",
-                        )
-                    )
-            self.devices_found.emit(devices)
+            self.devices_found.emit(_merge_by_device(devices, keyboard, mouse))
         except DeviceDiscoveryError as exc:
             self.discovery_failed.emit(str(exc))
 
@@ -165,6 +176,16 @@ class DeviceRow(QFrame):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.set_selected(selected)
 
+        readings = device.battery_readings
+        if not readings and device.battery_percent is not None:
+            readings = (
+                (
+                    "电量",
+                    device.battery_percent,
+                    device.battery_source or device.transport,
+                ),
+            )
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 7, 10, 8)
         layout.setSpacing(5)
@@ -184,31 +205,48 @@ class DeviceRow(QFrame):
         )
         header.addWidget(self._name, 1)
 
-        if device.battery_percent is not None:
-            percent = self._prepare(QLabel(f"{device.battery_percent}%"))
+        if len(readings) == 1:
+            percent = self._prepare(QLabel(f"{readings[0][1]}%"))
             percent.setStyleSheet(
                 f"color: {GREEN_TEXT}; font-size: 12px; font-weight: 600;"
             )
             header.addWidget(percent, 0, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(header)
 
-        parts = [part for part in (device.vid_pid, _source_text(device)) if part]
-        if device.battery_percent is None:
-            parts.append("电量未公开")
+        parts = [part for part in (device.vid_pid, _meta_text(device, readings)) if part]
         meta = self._prepare(QLabel(" · ".join(parts)))
         meta.setStyleSheet(f"color: {META_COLOR}; font-size: 10px;")
         layout.addWidget(meta)
 
-        if device.battery_percent is None:
-            return
-
-        bar = self._prepare(QProgressBar())
-        bar.setRange(0, 100)
-        bar.setValue(max(0, min(100, device.battery_percent)))
-        bar.setTextVisible(False)
-        bar.setFixedHeight(6)
-        bar.setStyleSheet(self._BAR_STYLE)
-        layout.addWidget(bar)
+        for label, percent_value, _source in readings:
+            if len(readings) == 1:
+                line = QHBoxLayout()
+                line.setSpacing(0)
+            else:
+                line = QHBoxLayout()
+                line.setSpacing(6)
+                tag = self._prepare(QLabel(label))
+                tag.setStyleSheet(f"color: {META_COLOR}; font-size: 10px;")
+                tag.setFixedWidth(28)
+                line.addWidget(tag)
+            bar = self._prepare(QProgressBar())
+            bar.setRange(0, 100)
+            bar.setValue(max(0, min(100, percent_value)))
+            bar.setTextVisible(False)
+            bar.setFixedHeight(6)
+            bar.setStyleSheet(self._BAR_STYLE)
+            line.addWidget(bar, 1)
+            if len(readings) > 1:
+                value = self._prepare(QLabel(f"{percent_value}%"))
+                value.setStyleSheet(
+                    f"color: {GREEN_TEXT}; font-size: 10px; font-weight: 600;"
+                )
+                value.setFixedWidth(34)
+                value.setAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
+                line.addWidget(value)
+            layout.addLayout(line)
 
     def _prepare(self, widget: QLabel | QProgressBar) -> QLabel | QProgressBar:
         widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -247,7 +285,6 @@ class OverlayWindow(QWidget):
         self.setWindowOpacity(self._opacity)
         self.setFixedWidth(500)
         self._build_ui()
-        self.resize(500, 300)
         self._discovery_thread: Optional[DeviceDiscoveryThread] = None
         self._refresh_timer = QTimer(self)
         self._refresh_timer.timeout.connect(self.refresh_devices)
@@ -343,8 +380,7 @@ class OverlayWindow(QWidget):
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.addWidget(panel)
-        self.setMinimumHeight(300)
-        self.setMaximumHeight(720)
+        self.setMinimumHeight(200)
 
     def refresh_devices(self) -> None:
         if self._discovery_thread is not None and self._discovery_thread.isRunning():
@@ -361,7 +397,8 @@ class OverlayWindow(QWidget):
         devices = self._unique_display_devices(discovered_devices)
         online_count = sum(device.status.upper() == "OK" for device in devices)
         readable_battery_count = sum(
-            device.battery_percent is not None for device in devices
+            bool(device.battery_readings) or device.battery_percent is not None
+            for device in devices
         )
         unknown_battery_count = len(devices) - readable_battery_count
         self._subtitle.setText(
@@ -438,8 +475,11 @@ class OverlayWindow(QWidget):
         self._fit_height()
 
     def _fit_height(self) -> None:
+        screen = self.screen()
+        available = screen.availableGeometry().height() if screen else 1080
+        limit = max(320, available - 80)
         target = max(
-            self.minimumHeight(), min(self.maximumHeight(), self.sizeHint().height())
+            self.minimumHeight(), min(limit, self.sizeHint().height())
         )
         if target != self.height():
             self.resize(self.width(), target)
@@ -489,21 +529,27 @@ class OverlayWindow(QWidget):
 
     @staticmethod
     def _detail_text(device: DeviceRecord) -> str:
-        battery = (
-            f"{device.battery_percent}%"
-            if device.battery_percent is not None
-            else "未公开"
-        )
-        source = _source_text(device)
-        link = f"连接 {source}"
+        readings = device.battery_readings
+        if readings:
+            battery = " / ".join(
+                f"{label} {percent}%（{source}）"
+                if "候选" in source
+                else f"{label} {percent}%"
+                for label, percent, source in readings
+            )
+        elif device.battery_percent is not None:
+            battery = f"{device.battery_percent}%"
+        else:
+            battery = "未公开"
+        link = f"连接 {device.transport}"
         if device.vid_pid:
             link = f"{link} · VID:PID {device.vid_pid}"
-        instance = device.instance_id.replace("\\", "\\\u200b")
+        device_id = device.instance_id.replace("\\", "\\\u200b")
         return (
             f"{device.name}\n"
             f"电量 {battery} · 状态 {device.status}\n"
             f"{link}\n"
-            f"ID {instance}"
+            f"ID {device_id}"
         )
 
     def _add_device_label(self, text: str, style: str) -> QLabel:

@@ -8,14 +8,14 @@ Windows 桌面浮层工具，实时查看已连接的 2.4G / USB / 蓝牙外设�
 
 - 透明、无边框、置顶浮层，可拖动到任意位置
 - 设备按 `音频设备` / `键盘` / `鼠标` 三类分组展示
-- 电量直接合并到对应设备行，同一台设备只出现一行，不额外新增条目
+- 按物理设备合并：同一个 2.4G 接收器的键盘、鼠标、多媒体等 HID 集合只显示一行，可同时展示键盘与鼠标电量
 - 有电量的设备显示绿色电量条与百分比
 - 无电量的设备明确标注 `电量未公开`，不猜测、不伪造百分比
-- 每行显示状态圆点、设备名、VID:PID 与连接方式
+- 每行显示状态圆点、设备名、VID:PID 与数据来源
 - 点击设备行展开详情，再次点击收起；不点击时不占用空间
 - 每 5 分钟自动刷新，也可随时手动刷新
-- 过滤笔记本内置 ACPI/PS-2 键盘与内置麦克风阵列
-- 窗口高度随内容自适应，上限 720 px，宽度固定 500 px
+- 过滤笔记本内置 ACPI/PS-2 键盘、内置麦克风阵列与内置触摸板
+- 窗口高度随内容自适应，最大不超过屏幕可用高度，宽度固定 500 px
 
 ## 界面操作
 
@@ -55,8 +55,9 @@ requirements.txt
 - `OverlayWindow`：透明浮层主窗口，负责分组渲染、详情面板、快捷键与定时刷新
 - `DeviceDiscoveryThread`：`QThread` 后台线程，避免查询设备时界面卡顿
 - `DeviceRow`：单台设备的行控件，包含状态圆点、电量条与百分比
-- `_attach_battery()`：把协议读取到的电量挂到匹配的 PnP 设备行上；找不到对应设备时才单独列出
-- 配色常量与 `_status_color()` / `_source_text()` 统一管理视觉语义：
+- `_merge_by_device()`：按 VID:PID 把同一物理设备的多个 HID 集合合并成一行，
+  并在该行同时显示键盘与鼠标的电量
+- 配色常量与 `_status_color()` / `_meta_text()` 统一管理视觉语义：
   绿色 = 已确认读取或在线，黄色 = 候选未完全验证，红色 = 异常
 
 ### `app/device_discovery.py` — 设备发现
@@ -87,7 +88,7 @@ DeviceDiscoveryThread (QThread)
         │  discover_devices()        → PowerShell → PnP 设备列表
         │  read_vendor_battery_candidates() → 3554:FA09 Feature Report 6
         │  read_mouse_battery()      → 24AE:1411 Input Report 7
-        │  _attach_battery()         → 按 VID:PID 合并到对应设备行
+        │  _merge_by_device()        → 按 VID:PID 合并各 HID 集合
         ▼
 list[DeviceRecord] ──Qt 信号──► OverlayWindow
         │
@@ -145,6 +146,8 @@ pywinusb
 ## 已知限制
 
 - 仅支持 Windows
+- 一台 2.4G 接收器会注册多个 HID 集合，程序按 VID:PID 合并为一行；但如果两台不同设备恰好共用同一个 VID:PID，也会被合并
+- 内置触摸板（`HID\UNIW...`）与内置键盘、麦克风阵列一样被过滤，不参与显示
 - 外设电量取决于设备是否暴露只读报告；Windows 通用 PnP 属性中的 `PowerData` 属于电源管理元数据，不能当作电量
 - 蓝牙耳机（如 HUAWEI FreeBuds SE 2）与普通 USB 音频设备目前读不到电量，Windows 设置中的合并电量未通过标准接口公开
 - 鼠标休眠时不发送报告，此时显示为无读数，不会误报 `0%`；移动鼠标即可重新取值

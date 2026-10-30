@@ -14,6 +14,7 @@ class DeviceRecord:
     instance_id: str
     battery_percent: int | None = None
     battery_source: str | None = None
+    battery_readings: tuple[tuple[str, int, str], ...] = ()
 
     @property
     def transport(self) -> str:
@@ -74,6 +75,12 @@ def _is_user_target_device(device_class: str, name: str, instance_id: str) -> bo
         )
     if device_class == "AudioEndpoint":
         return "麦克风阵列" not in name
+    if device_class == "Mouse":
+        upper_id = instance_id.upper()
+        # Windows exposes the built-in precision touchpad as a HID mouse.
+        if upper_id.startswith("HID\\UNIW"):
+            return False
+        return not ("触摸板" in name or "touchpad" in name.casefold())
     return True
 
 
