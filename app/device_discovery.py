@@ -50,11 +50,8 @@ $classes = @('AudioEndpoint', 'Keyboard', 'Mouse')
 $devices = Get-PnpDevice -PresentOnly |
     Where-Object { $_.Class -in $classes } |
     Select-Object Status, Class, FriendlyName, InstanceId
-$battery = Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue |
-    Select-Object Name, Status, EstimatedChargeRemaining, EstimatedRunTime
 [PSCustomObject]@{
     Devices = @($devices)
-    Batteries = @($battery)
 } | ConvertTo-Json -Compress
 """
 
@@ -107,20 +104,6 @@ def _records_from_json(payload: Any) -> list[DeviceRecord]:
     return records
 
 
-def _battery_from_json(payload: Any) -> int | None:
-    batteries = payload.get("Batteries") if isinstance(payload, dict) else None
-    if not isinstance(batteries, list):
-        return None
-    levels = [
-        item.get("EstimatedChargeRemaining")
-        for item in batteries
-        if isinstance(item, dict)
-        and isinstance(item.get("EstimatedChargeRemaining"), int)
-        and 0 <= item["EstimatedChargeRemaining"] <= 100
-    ]
-    return min(levels) if levels else None
-
-
 def discover_devices() -> list[DeviceRecord]:
     try:
         completed = subprocess.run(
@@ -152,15 +135,4 @@ def discover_devices() -> list[DeviceRecord]:
     except json.JSONDecodeError as exc:
         raise DeviceDiscoveryError("Windows returned invalid device data.") from exc
     devices = _records_from_json(payload)
-    battery_percent = _battery_from_json(payload)
-    if battery_percent is not None:
-        devices.append(
-            DeviceRecord(
-                category="本机电池",
-                name="Windows ACPI 电池",
-                status="OK",
-                instance_id="system-battery",
-                battery_percent=battery_percent,
-            )
-        )
     return devices

@@ -147,14 +147,16 @@ The detail view now identifies the device transport and, when present, its
 VID:PID. This is a read-only identification step for selecting a safe
 device-specific battery protocol; it does not send HID commands.
 
-The device list is scrollable and the overlay height is capped so a larger
-number of device entries cannot expand the window beyond the screen.
+The device list no longer uses a scroll area; the overlay sizes itself to the
+number of rows and caps at 720 px. Each peripheral with a known battery shows a
+green progress bar with its percentage, and rows without a value show
+`电量：未知（Windows 未公开）`. Clicking a row expands a detail panel below the
+list; clicking the same row again collapses it, and the panel stays hidden
+until a row is clicked. The system battery is no longer queried or displayed.
 
 The application still calculates how many peripheral battery values were read
 and how many remain undisclosed by Windows, but this summary is hidden from the
-overlay to keep the panel compact. Each row shows the current battery source:
-`Win32_Battery` for the system battery, `Windows` for a device-specific value,
-or `待探测` when a vendor/HID protocol has not yet been identified.
+overlay to keep the panel compact.
 
 ## HID battery investigation
 
