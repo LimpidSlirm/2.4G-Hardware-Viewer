@@ -175,7 +175,7 @@ not return a report, so no battery value is inferred from this probe.
 
 The current vendor probe can read `3554:FA09` Report 6 through `pywinusb`
 without sending a report. On the development computer it returned stable
-candidate bytes `(100, 100, 100)` in three consecutive reads. These are shown
-under `电量候选` with source `厂商报告候选`; they are not yet assigned to a
-specific keyboard or mouse until a controlled battery-change test confirms the
-byte mapping.
+candidate bytes `(100, 100, 100)` in three consecutive reads. Because this
+receiver exposes the keyboard and mouse together, the first value is currently
+shown as `键盘电量候选 100%`; it remains explicitly marked as a candidate until
+a controlled battery-change test confirms the byte mapping.

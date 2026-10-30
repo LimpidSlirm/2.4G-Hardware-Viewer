@@ -31,9 +31,9 @@ class DeviceDiscoveryThread(QThread):
             for reading in read_vendor_battery_candidates():
                 devices.append(
                     DeviceRecord(
-                        category="电量候选",
+                        category="键盘电量候选",
                         name=f"{reading.vendor_id:04X}:{reading.product_id:04X} "
-                        f"Report {reading.report_id}",
+                        f"Report {reading.report_id}（键盘候选）",
                         status="候选",
                         instance_id="vendor-feature-report",
                         battery_percent=reading.values[0],
@@ -250,7 +250,7 @@ class OverlayWindow(QWidget):
                 self._add_device_label(str(row), "color: #ffb4ab;")
             return
 
-        category_order = ("耳机/音频", "键盘", "鼠标", "电量候选")
+        category_order = ("耳机/音频", "键盘", "鼠标", "键盘电量候选")
         for category in category_order:
             category_devices = [
                 device for device in devices if device.category == category
