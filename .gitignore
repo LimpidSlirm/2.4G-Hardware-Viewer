@@ -8,4 +8,5 @@ venv/
 build/
 dist/
 *.egg-info/
-
+# Local development log (never push)
+20261030-Hardware-Viewer.md

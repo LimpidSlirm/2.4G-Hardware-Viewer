@@ -11,10 +11,12 @@ from PySide6.QtWidgets import (
     QApplication,
     QFrame,
     QLabel,
+    QMenu,
     QProgressBar,
     QPushButton,
     QHBoxLayout,
     QSizePolicy,
+    QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
 )
@@ -23,6 +25,7 @@ from .autostart import install_autostart, remove_autostart
 from .battery_protocols import read_mouse_battery, read_vendor_battery_candidates
 from .device_discovery import DeviceDiscoveryError, DeviceRecord, discover_devices
 from .hotkey import MOD_ALT, MOD_CONTROL, GlobalHotkey
+from .tray import make_battery_icon
 
 FULL_WIDTH = 500
 MINI_WIDTH = 210
@@ -293,8 +296,12 @@ class OverlayWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setWindowOpacity(self._opacity)
         self._compact = True
+        self._quitting = False
+        self._tray: Optional[QSystemTrayIcon] = None
+        self._hotkey: Optional[GlobalHotkey] = None
         self.setFixedWidth(MINI_WIDTH)
         self._build_ui()
+        self._build_tray()
         self._apply_mode()
         self._discovery_thread: Optional[DeviceDiscoveryThread] = None
         self._refresh_timer = QTimer(self)
@@ -369,7 +376,7 @@ class OverlayWindow(QWidget):
             """
         )
         self._refresh_button.clicked.connect(self.refresh_devices)
-        hint = QLabel("拖动移动 · 点击行查看详情 · Ctrl+Alt+B 切换 · Esc 关闭")
+        hint = QLabel("拖动移动 · 点击行查看详情 · Ctrl+Alt+B 切换 · Esc 收起")
         hint.setStyleSheet(f"color: #6b7c92; font-size: 10px;")
 
         layout = QVBoxLayout(panel)
@@ -447,6 +454,7 @@ class OverlayWindow(QWidget):
         )
         self._render_mini(devices)
         self._replace_device_rows(devices)
+        self._update_tray(devices)
 
     def _display_discovery_error(self, message: str) -> None:
         self._subtitle.setText("设备读取失败")
@@ -456,6 +464,7 @@ class OverlayWindow(QWidget):
         )
         self._render_mini([])
         self._replace_device_rows([f"错误：{message}"])
+        self._update_tray([])
 
     def _discovery_finished(self) -> None:
         self._refresh_button.setEnabled(True)
@@ -526,6 +535,100 @@ class OverlayWindow(QWidget):
         if target != self.height():
             self.resize(self.width(), target)
 
+    def _build_tray(self) -> None:
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+        menu = QMenu()
+        menu.setStyleSheet(
+            f"""
+            QMenu {{
+                background-color: #1b2330;
+                border: 1px solid rgba(148, 163, 184, 60);
+                padding: 4px;
+                color: {DETAIL_COLOR};
+                font-size: 11px;
+            }}
+            QMenu::item {{
+                padding: 5px 18px 5px 14px;
+                border-radius: 4px;
+            }}
+            QMenu::item:selected {{
+                background-color: rgba(74, 222, 128, 55);
+            }}
+            """
+        )
+        menu.addAction("显示迷你窗", self.show_compact)
+        menu.addAction("显示完整界面", self.show_full)
+        menu.addAction("立即刷新", self.refresh_devices)
+        menu.addSeparator()
+        menu.addAction("退出", self.quit_application)
+
+        tray = QSystemTrayIcon(make_battery_icon(None), self)
+        tray.setContextMenu(menu)
+        tray.setToolTip("2.4G Hardware Viewer")
+        tray.activated.connect(self._on_tray_activated)
+        tray.show()
+
+        self._tray_menu = menu
+        self._tray = tray
+
+    def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self.show_full()
+            return
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            if self.isVisible():
+                self.hide()
+            else:
+                self.show_compact()
+
+    def _update_tray(self, devices: list[DeviceRecord]) -> None:
+        if self._tray is None:
+            return
+        readings: list[tuple[str, int]] = []
+        for device in devices:
+            for label, percent, _source in device.battery_readings:
+                readings.append((label, percent))
+            if not device.battery_readings and device.battery_percent is not None:
+                readings.append((device.name, device.battery_percent))
+
+        self._tray.setIcon(
+            make_battery_icon(min(percent for _label, percent in readings))
+            if readings
+            else make_battery_icon(None)
+        )
+        if readings:
+            detail = " · ".join(f"{label} {percent}%" for label, percent in readings)
+            self._tray.setToolTip(f"2.4G Hardware Viewer\n{detail}")
+        else:
+            self._tray.setToolTip("2.4G Hardware Viewer\n暂无电量")
+
+    def show_compact(self) -> None:
+        self._compact = True
+        self._apply_mode()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def show_full(self) -> None:
+        self._compact = False
+        self._apply_mode()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def hide_to_tray(self) -> None:
+        self.hide()
+
+    def quit_application(self) -> None:
+        self._quitting = True
+        if self._hotkey is not None:
+            self._hotkey.unregister()
+        self.close()
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
+
     def _apply_mode(self) -> None:
         self._mini_panel.setVisible(self._compact)
         self._panel.setVisible(not self._compact)
@@ -535,6 +638,8 @@ class OverlayWindow(QWidget):
     def toggle_mode(self) -> None:
         self._compact = not self._compact
         self._apply_mode()
+        if not self.isVisible():
+            self.show()
         self.raise_()
         self.activateWindow()
 
@@ -700,11 +805,18 @@ class OverlayWindow(QWidget):
         self._refresh_timer.stop()
         if self._discovery_thread is not None and self._discovery_thread.isRunning():
             self._discovery_thread.wait(11000)
+        if not self._quitting:
+            # Keep the process alive in the notification area so the hotkey works.
+            event.ignore()
+            self.hide()
+            return
+        if self._tray is not None:
+            self._tray.hide()
         event.accept()
 
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key.Key_Escape:
-            self.close()
+            self.hide_to_tray()
             return
         if event.key() == Qt.Key.Key_F5:
             self.refresh_devices()
@@ -739,6 +851,7 @@ def main() -> int:
         HOTKEY_ID, MOD_CONTROL | MOD_ALT, HOTKEY_VK_B, window.toggle_mode
     )
     app.installNativeEventFilter(hotkey)
+    window._hotkey = hotkey
 
     if "--smoke-test" in sys.argv:
         if window._discovery_thread is not None:
