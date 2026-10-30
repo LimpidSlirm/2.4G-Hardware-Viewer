@@ -103,5 +103,7 @@ The current discovery layer only reads device identity and connection status.
 It does not capture keyboard input, mouse movement, audio content, or raw
 2.4G packets.
 
-The device panel groups results by category, shows normal-status counts, and
-refreshes automatically every five seconds.
+The device panel groups results by category, removes repeated display entries
+that represent the same category, name, and status, shows normal-status counts,
+and refreshes automatically every five seconds. The underlying Windows
+instance IDs are retained for future detail views.

@@ -70,7 +70,7 @@ class OverlayWindow(QWidget):
 
     def refresh_devices(self) -> None:
         try:
-            devices = discover_devices()
+            devices = self._unique_display_devices(discover_devices())
         except DeviceDiscoveryError as exc:
             self._subtitle.setText("设备读取失败")
             self._replace_device_rows([f"错误：{exc}"])
@@ -81,6 +81,18 @@ class OverlayWindow(QWidget):
             f"已发现 {len(devices)} 个设备  |  正常 {online_count}"
         )
         self._replace_device_rows(devices)
+
+    @staticmethod
+    def _unique_display_devices(devices: list[DeviceRecord]) -> list[DeviceRecord]:
+        unique_devices: list[DeviceRecord] = []
+        seen: set[tuple[str, str, str]] = set()
+        for device in devices:
+            key = (device.category, device.name.casefold(), device.status.casefold())
+            if key in seen:
+                continue
+            seen.add(key)
+            unique_devices.append(device)
+        return unique_devices
 
     def _replace_device_rows(self, devices: list[DeviceRecord] | list[str]) -> None:
         while self._device_layout.count():
