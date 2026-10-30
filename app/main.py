@@ -176,8 +176,16 @@ class OverlayWindow(QWidget):
     def _display_devices(self, discovered_devices: list[DeviceRecord]) -> None:
         devices = self._unique_display_devices(discovered_devices)
         online_count = sum(device.status.upper() == "OK" for device in devices)
+        readable_battery_count = sum(
+            device.battery_percent is not None
+            for device in devices
+            if device.category != "本机电池"
+        )
+        peripheral_count = sum(device.category != "本机电池" for device in devices)
+        unknown_battery_count = peripheral_count - readable_battery_count
         self._subtitle.setText(
-            f"已发现 {len(devices)} 个设备  |  正常 {online_count}"
+            f"已发现 {len(devices)} 个设备  |  正常 {online_count}\n"
+            f"外设电量：已读取 {readable_battery_count}  |  未公开 {unknown_battery_count}"
         )
         self._refresh_info.setText(
             f"刷新：{datetime.now().strftime('%H:%M:%S')}  |  自动刷新：5 分钟  |  透明度：{round(self._opacity * 100)}%"
@@ -237,9 +245,9 @@ class OverlayWindow(QWidget):
             for device in category_devices:
                 color = "#a7e3b1" if device.status.upper() == "OK" else "#ffb4ab"
                 battery = (
-                    f"  电量：{device.battery_percent}%"
+                    f"  电量：{device.battery_percent}%  ·  来源：Windows"
                     if device.battery_percent is not None
-                    else "  电量：未知（Windows 未公开）"
+                    else "  电量：未知（Windows 未公开）  ·  来源：待探测"
                 )
                 label = DeviceLabel(
                     device,
@@ -260,7 +268,7 @@ class OverlayWindow(QWidget):
             )
             for device in battery_devices:
                 self._add_device_label(
-                    f"  {device.name}  ·  电量：{device.battery_percent}%",
+                    f"  {device.name}  ·  电量：{device.battery_percent}%  ·  来源：Win32_Battery",
                     "color: #a7e3b1; font-size: 11px;",
                 )
 
