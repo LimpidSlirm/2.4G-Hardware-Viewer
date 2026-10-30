@@ -305,6 +305,26 @@ class OverlayWindow(QWidget):
         self._refresh_timer = QTimer(self)
         self._refresh_timer.timeout.connect(self.refresh_devices)
         self._refresh_timer.start(300000)
+        self._last_mouse_clock: Optional[str] = None
+        # The mouse reports rarely, so poll the listener cache and refresh the
+        # view as soon as a new reading lands instead of waiting five minutes.
+        self._mouse_watch = QTimer(self)
+        self._mouse_watch.timeout.connect(self._watch_mouse_reading)
+        self._mouse_watch.start(3000)
+        self.refresh_devices()
+
+    def _watch_mouse_reading(self) -> None:
+        status = read_mouse_battery(timeout_seconds=0.0)
+        if status is None:
+            return
+        clock = f"{status.captured_clock}|{status.battery_percent}"
+        if clock == self._last_mouse_clock:
+            return
+        if self._discovery_thread is not None and self._discovery_thread.isRunning():
+            # A refresh is already in flight; keep the pending value so the next
+            # tick retries instead of dropping this reading.
+            return
+        self._last_mouse_clock = clock
         self.refresh_devices()
 
     def _build_ui(self) -> None:
@@ -705,6 +725,7 @@ class OverlayWindow(QWidget):
 
     def closeEvent(self, event) -> None:
         self._refresh_timer.stop()
+        self._mouse_watch.stop()
         if self._discovery_thread is not None and self._discovery_thread.isRunning():
             self._discovery_thread.wait(11000)
         event.accept()
@@ -736,8 +757,8 @@ def main() -> int:
         return 0
 
     app = QApplication(sys.argv)
-    window = OverlayWindow()
     start_mouse_listener()
+    window = OverlayWindow()
     available_geometry = app.primaryScreen().availableGeometry()
     position = available_geometry.topLeft() + QPoint(40, 40)
     window.move(position)

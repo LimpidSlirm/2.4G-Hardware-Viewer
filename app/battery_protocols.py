@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import json
 import threading
 import time
 
 from dataclasses import dataclass, replace
 from datetime import datetime
+from pathlib import Path
 
 from pywinusb import hid
+
+from .hid_inventory import enumerate_hid_interfaces, read_input_reports
 
 
 @dataclass(frozen=True)
@@ -94,6 +98,65 @@ _MOUSE_CACHE: dict[tuple[int, int], tuple[RapooStatus, float]] = {}
 _MOUSE_CACHE_LOCK = threading.Lock()
 _MOUSE_LISTENER: "MouseBatteryListener | None" = None
 _MOUSE_LISTENER_LOCK = threading.Lock()
+_CACHE_FILE = Path(__file__).resolve().parent.parent / ".mouse_battery_cache.json"
+
+
+def _load_cache_from_disk() -> None:
+    """Restore the last reading so a restart does not blank the battery row."""
+    try:
+        payload = json.loads(_CACHE_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    for key, entry in payload.items():
+        try:
+            vendor_text, product_text = key.split(":")
+            vendor_id = int(vendor_text, 16)
+            product_id = int(product_text, 16)
+            status = RapooStatus(
+                vendor_id=vendor_id,
+                product_id=product_id,
+                device_id=int(entry["device_id"]),
+                dpi_index=int(entry["dpi_index"]),
+                dpi_x=int(entry["dpi_x"]),
+                dpi_y=int(entry["dpi_y"]),
+                active_state=int(entry["active_state"]),
+                battery_percent=int(entry["battery_percent"]),
+                captured_clock=str(entry.get("captured_clock", "")),
+                cached=True,
+            )
+            age = max(0.0, time.time() - float(entry["saved_at"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        with _MOUSE_CACHE_LOCK:
+            _MOUSE_CACHE[(vendor_id, product_id)] = (status, time.monotonic() - age)
+
+
+def _save_cache_to_disk(status: RapooStatus) -> None:
+    key = f"{status.vendor_id:04X}:{status.product_id:04X}"
+    payload: dict[str, dict[str, object]] = {}
+    try:
+        existing = json.loads(_CACHE_FILE.read_text(encoding="utf-8"))
+        if isinstance(existing, dict):
+            payload = existing
+    except (OSError, ValueError):
+        payload = {}
+    payload[key] = {
+        "device_id": status.device_id,
+        "dpi_index": status.dpi_index,
+        "dpi_x": status.dpi_x,
+        "dpi_y": status.dpi_y,
+        "active_state": status.active_state,
+        "battery_percent": status.battery_percent,
+        "captured_clock": status.captured_clock,
+        "saved_at": time.time(),
+    }
+    try:
+        _CACHE_FILE.write_text(json.dumps(payload), encoding="utf-8")
+    except OSError:
+        pass
+
+
+_load_cache_from_disk()
 
 
 class MouseBatteryListener:
@@ -129,48 +192,30 @@ class MouseBatteryListener:
 
     def _run(self) -> None:
         while not self._stop.is_set():
-            device = self._open_device()
-            if device is None:
+            interface = self._find_interface()
+            if interface is None:
                 self.connected = False
                 self._stop.wait(5)
                 continue
             self.connected = True
             try:
-                while not self._stop.is_set():
-                    self._stop.wait(1)
+                read_input_reports(interface, self._handle, self._stop)
+            except Exception:
+                pass
             finally:
-                try:
-                    device.set_raw_data_handler(None)
-                except Exception:
-                    pass
-                try:
-                    device.close()
-                except Exception:
-                    pass
-                self._device = None
                 self.connected = False
+            if not self._stop.is_set():
+                self._stop.wait(3)
 
-    def _open_device(self):
-        for device in hid.HidDeviceFilter(
-            vendor_id=self.vendor_id, product_id=self.product_id
-        ).get_devices():
-            try:
-                device.open()
-                if not any(
-                    report.report_id == RAPOO_REPORT_ID
-                    for report in device.find_input_reports()
-                ):
-                    device.close()
-                    continue
-                device.set_raw_data_handler(self._handle)
-                self._device = device
-                return device
-            except (OSError, hid.HIDError):
-                try:
-                    device.close()
-                except Exception:
-                    pass
+    def _find_interface(self):
+        for interface in enumerate_hid_interfaces():
+            if interface.vid_pid != f"{self.vendor_id:04X}:{self.product_id:04X}":
                 continue
+            if interface.usage_page != 0xFF00 or interface.usage != 0x0002:
+                continue
+            if interface.input_report_length <= 0:
+                continue
+            return interface
         return None
 
     def _handle(self, data: list[int]) -> None:
@@ -189,6 +234,7 @@ class MouseBatteryListener:
                 stamped,
                 time.monotonic(),
             )
+        _save_cache_to_disk(stamped)
 
 
 def start_mouse_listener(

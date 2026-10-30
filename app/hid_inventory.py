@@ -168,6 +168,16 @@ def _configure_functions() -> tuple[ctypes.WinDLL, ctypes.WinDLL, ctypes.WinDLL]
     kernel32.CreateFileW.restype = wintypes.HANDLE
     kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
     kernel32.CloseHandle.restype = wintypes.BOOL
+    kernel32.ReadFile.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+        ctypes.c_void_p,
+    ]
+    kernel32.ReadFile.restype = wintypes.BOOL
+    kernel32.CancelIoEx.argtypes = [wintypes.HANDLE, ctypes.c_void_p]
+    kernel32.CancelIoEx.restype = wintypes.BOOL
     return setupapi, hid, kernel32
 
 
@@ -339,3 +349,47 @@ def probe_feature_reports(
             if data is not None:
                 reports.append(FeatureReport(interface, report_id, data))
     return reports
+
+
+def read_input_reports(
+    interface: HidInterface,
+    on_report,
+    stop_event,
+    buffer_size: int = 64,
+) -> None:
+    """Block on ReadFile and hand every input report to ``on_report``.
+
+    pywinusb delivers reports through a Windows message loop, which does not run
+    while a Qt event loop owns the thread, so this uses a plain blocking read on
+    a dedicated thread instead. No report is ever written.
+    """
+    _, _, kernel32 = _configure_functions()
+    handle = kernel32.CreateFileW(
+        interface.path,
+        0x80000000,  # GENERIC_READ
+        3,  # FILE_SHARE_READ | FILE_SHARE_WRITE
+        None,
+        _OPEN_EXISTING,
+        0,
+        None,
+    )
+    if handle == _INVALID_HANDLE_VALUE:
+        return
+    try:
+        buffer = (ctypes.c_ubyte * buffer_size)()
+        read = wintypes.DWORD(0)
+        while not stop_event.is_set():
+            ok = kernel32.ReadFile(
+                handle,
+                ctypes.cast(buffer, ctypes.c_void_p),
+                buffer_size,
+                ctypes.byref(read),
+                None,
+            )
+            if not ok:
+                break
+            if read.value:
+                on_report(list(buffer[: read.value]))
+    finally:
+        kernel32.CancelIoEx(handle, None)
+        kernel32.CloseHandle(handle)
