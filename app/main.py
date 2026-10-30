@@ -47,10 +47,10 @@ class DeviceDiscoveryThread(QThread):
                     DeviceRecord(
                         category="鼠标电量候选",
                         name=f"{reading.vendor_id:04X}:{reading.product_id:04X} "
-                        f"Report {reading.report_id}（鼠标电量）",
-                        status="已读取",
+                        f"Report {reading.report_id}（候选字段 {reading.values[0]}）",
+                        status="待验证",
                         instance_id="mouse-input-report",
-                        battery_percent=reading.values[0],
+                        battery_percent=None,
                     )
                 )
             self.devices_found.emit(devices)

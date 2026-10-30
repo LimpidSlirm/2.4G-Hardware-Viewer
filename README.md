@@ -227,10 +227,13 @@ sends Input Report 7 on its HID mouse interface. A captured report was:
 [7, 16, 3, 64, 6, 64, 6, 1, 99, 0, 2, 2, 0]
 ```
 
-For this device, byte `[7]` is the observed charging-state field and byte
-`[8]` is the battery percentage. The application now listens for this report
-without sending an Output or Feature Report and records the observed value
-(`99%` in the verification sample). The mouse may be asleep and emit no
+The report repeatedly contained `99` at byte `[8]`, but this is not yet
+accepted as the battery percentage. The publicly available Rapoo protocol
+documentation that maps this byte applies to `24AE:1413` (Rapoo VT7) and
+describes a 19-byte report, while this device is `24AE:1411` and emitted a
+13-byte report. The application still listens without sending an Output or
+Feature Report, but keeps this value as an unverified candidate rather than
+displaying it as the mouse battery. The mouse may be asleep and emit no
 report until it is moved; no report is treated as an unknown value, not as
 0%.
 
