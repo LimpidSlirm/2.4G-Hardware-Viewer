@@ -188,3 +188,11 @@ from the HID inventory and its vendor battery probe returned no reading. The
 the headset's Bluetooth/audio endpoints. This means the next mapping test must
 connect one peripheral at a time; Windows may retain audio endpoints after a
 Bluetooth device is disconnected.
+
+With only the mouse connected, the active target was `24AE:1411` (`Rapoo
+Gaming Device`). Its HID interfaces declared 33-byte Feature Reports. A
+read-only probe returned an incompatible-report-ID error for Report 8 and 33
+zero bytes for Report 9. These values are not treated as a battery reading:
+zero may be protocol data or an unsupported report, not 0% battery. The
+existing `3554:FA09` battery reader correctly returned no result in this
+configuration.
