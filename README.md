@@ -77,6 +77,7 @@ app/
   hotkey.py             Win32 全局快捷键
   autostart.py          开机自启项读写
   hid_inventory.py      HID 接口枚举与诊断（工具）
+  feature_log.py        Feature Report 长时记录（工具）
 launch.pyw              自启动用的无控制台入口
 requirements.txt
 ```
@@ -121,6 +122,21 @@ requirements.txt
 
 只读枚举系统中的 HID 接口，输出 VID/PID、Usage Page、Usage 以及各类报告长度，
 并可在安全范围内读取 Feature Report。该模块不参与日常界面流程，用于排查新设备的协议入口。
+
+### `app/feature_log.py` — Feature Report 长时记录
+
+`3554:FA09` 的 Feature Report 6 目前读作 `[6, 0, 2, 100, 100, 100, 53, 21]`，
+但满电时所有候选值都是 100，无法判断哪个字节才是电量。该工具定期采样并追加到 CSV，
+等电量明显下降后对比各行即可定位。
+
+```powershell
+python -m app.feature_log                        # 每 60 秒采样，Ctrl+C 结束
+python -m app.feature_log --interval 30          # 调整采样间隔
+python -m app.feature_log --count 10             # 只采 10 次
+```
+
+输出默认写入项目根目录的 `keyboard1_feature_log.csv`（已在 `.gitignore` 中排除）。
+设备不可用时该行记为 `NA`，不会中断记录。
 
 ## 数据流
 
@@ -222,6 +238,7 @@ pywinusb
 - 读数缓存写入项目根目录的 `.mouse_battery_cache.json`（已在 `.gitignore` 中排除），重启后可立即恢复上次读数
 - 键盘电量的原始字段抖动约 ±4，中位数平滑会让数值变化略滞后于真实电量
 - 键盘报告的三个候选字节尚未逐字节独立验证，界面标注为“候选”
+- `3554:FA09` 不主动广播任何报文（`0xFF02/0x02` 监听 40 秒为 0 条），只能靠 Feature Report 主动拉取，因此键盘2 那套被动监听方案不适用于它
 - 不解析 2.4G 空中数据包
 - 程序正式代码全程只读：不发送 Output Report 或 Feature Report 写命令，不读取键盘按键内容或鼠标移动轨迹
 - 逆向阶段曾用临时脚本向设备发过探测包（含全零包与 VIA 标准查询），这些脚本未进入代码库，详见开发日志
