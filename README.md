@@ -111,3 +111,6 @@ instance IDs are retained for future detail views.
 The panel also provides an immediate refresh button. Hovering over a device
 shows its Windows instance ID without adding the technical identifier to the
 main display.
+
+Device discovery runs in a background Qt thread, so the transparent window
+remains responsive while an immediate or automatic refresh queries Windows.

@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from typing import Optional
 
-from PySide6.QtCore import QPoint, Qt, QTimer
+from PySide6.QtCore import QPoint, QThread, Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QMouseEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -15,6 +15,17 @@ from PySide6.QtWidgets import (
 )
 
 from .device_discovery import DeviceDiscoveryError, DeviceRecord, discover_devices
+
+
+class DeviceDiscoveryThread(QThread):
+    devices_found = Signal(list)
+    discovery_failed = Signal(str)
+
+    def run(self) -> None:
+        try:
+            self.devices_found.emit(discover_devices())
+        except DeviceDiscoveryError as exc:
+            self.discovery_failed.emit(str(exc))
 
 
 class OverlayWindow(QWidget):
@@ -29,6 +40,7 @@ class OverlayWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setMinimumSize(460, 300)
         self._build_ui()
+        self._discovery_thread: Optional[DeviceDiscoveryThread] = None
         self._refresh_timer = QTimer(self)
         self._refresh_timer.timeout.connect(self.refresh_devices)
         self._refresh_timer.start(5000)
@@ -97,18 +109,33 @@ class OverlayWindow(QWidget):
         outer_layout.addWidget(panel)
 
     def refresh_devices(self) -> None:
-        try:
-            devices = self._unique_display_devices(discover_devices())
-        except DeviceDiscoveryError as exc:
-            self._subtitle.setText("设备读取失败")
-            self._replace_device_rows([f"错误：{exc}"])
+        if self._discovery_thread is not None and self._discovery_thread.isRunning():
             return
+        self._refresh_button.setEnabled(False)
+        self._subtitle.setText("正在读取 Windows 设备...")
+        self._discovery_thread = DeviceDiscoveryThread(self)
+        self._discovery_thread.devices_found.connect(self._display_devices)
+        self._discovery_thread.discovery_failed.connect(self._display_discovery_error)
+        self._discovery_thread.finished.connect(self._discovery_finished)
+        self._discovery_thread.start()
 
+    def _display_devices(self, discovered_devices: list[DeviceRecord]) -> None:
+        devices = self._unique_display_devices(discovered_devices)
         online_count = sum(device.status.upper() == "OK" for device in devices)
         self._subtitle.setText(
             f"已发现 {len(devices)} 个设备  |  正常 {online_count}"
         )
         self._replace_device_rows(devices)
+
+    def _display_discovery_error(self, message: str) -> None:
+        self._subtitle.setText("设备读取失败")
+        self._replace_device_rows([f"错误：{message}"])
+
+    def _discovery_finished(self) -> None:
+        self._refresh_button.setEnabled(True)
+        if self._discovery_thread is not None:
+            self._discovery_thread.deleteLater()
+            self._discovery_thread = None
 
     @staticmethod
     def _unique_display_devices(devices: list[DeviceRecord]) -> list[DeviceRecord]:
@@ -180,6 +207,12 @@ class OverlayWindow(QWidget):
         self._drag_offset = None
         super().mouseReleaseEvent(event)
 
+    def closeEvent(self, event) -> None:
+        self._refresh_timer.stop()
+        if self._discovery_thread is not None and self._discovery_thread.isRunning():
+            self._discovery_thread.wait(11000)
+        event.accept()
+
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key.Key_Escape:
             self.close()
@@ -194,7 +227,10 @@ def main() -> int:
     window.show()
 
     if "--smoke-test" in sys.argv:
-        QTimer.singleShot(100, app.quit)
+        if window._discovery_thread is not None:
+            window._discovery_thread.finished.connect(app.quit)
+        else:
+            QTimer.singleShot(100, app.quit)
 
     return app.exec()
 
