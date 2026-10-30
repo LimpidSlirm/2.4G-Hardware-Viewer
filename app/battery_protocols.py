@@ -345,42 +345,83 @@ def _listen_mouse_report(
 KEYBOARD_VENDOR_ID = 0x0C45
 KEYBOARD_PRODUCT_ID = 0xFEFE
 
-_KEYBOARD_STATE: dict[str, object] = {
-    "percent": None,
-    "raw": None,
-    "clock": "",
-    "reports": 0,
-}
+# The vendor stream repeats a 3-report cycle; the battery-ish value sits at [26]
+# of the type-0x10 report and jitters by a few points, so it is median-filtered.
+_KEYBOARD_REPORT_TYPE = 0x10
+_KEYBOARD_BATTERY_INDEX = 26
+_KEYBOARD_HISTORY = 5
+
+_KEYBOARD_VALUES: list[int] = []
+_KEYBOARD_CLOCK = ""
+_KEYBOARD_REPORTS = 0
 _KEYBOARD_LOCK = threading.Lock()
 _KEYBOARD_LISTENER = None
 _KEYBOARD_LISTENER_LOCK = threading.Lock()
 
 
 def parse_keyboard_battery(raw: list[int]) -> int | None:
-    """Decode the battery byte of the vendor broadcast.
+    """Return the raw battery-ish byte of a type-0x10 vendor report."""
+    if len(raw) <= _KEYBOARD_BATTERY_INDEX:
+        return None
+    if raw[2] != _KEYBOARD_REPORT_TYPE:
+        return None
+    value = raw[_KEYBOARD_BATTERY_INDEX]
+    if not 0 <= value <= 100:
+        return None
+    return value
 
-    ``raw[1]`` is BCD: 0x55 -> 55. Across 378 sampled reports every other byte
-    moved while this one stayed fixed, and its BCD value matched the level the
-    user read from the keyboard, so it is the strongest candidate field.
-    """
-    if len(raw) < 2:
-        return None
-    value = raw[1]
-    high, low = value >> 4, value & 0x0F
-    if high > 9 or low > 9:
-        return None
-    percent = high * 10 + low
-    if not 0 <= percent <= 100:
-        return None
-    return percent
+
+def _median(values: list[int]) -> int:
+    ordered = sorted(values)
+    return ordered[len(ordered) // 2]
+
+
+_KEYBOARD_CACHE_KEY = f"{KEYBOARD_VENDOR_ID:04X}:{KEYBOARD_PRODUCT_ID:04X}"
+
+
+def _save_keyboard_reading(percent: int, clock: str) -> None:
+    payload: dict[str, object] = {}
+    try:
+        existing = json.loads(_CACHE_FILE.read_text(encoding="utf-8"))
+        if isinstance(existing, dict):
+            payload = existing
+    except (OSError, ValueError):
+        payload = {}
+    payload[_KEYBOARD_CACHE_KEY] = {
+        "battery": percent,
+        "captured_clock": clock,
+        "saved_at": time.time(),
+    }
+    try:
+        _CACHE_FILE.write_text(json.dumps(payload), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _load_keyboard_reading() -> None:
+    """Restore the last reading so an idle keyboard still shows a value."""
+    global _KEYBOARD_CLOCK
+    try:
+        payload = json.loads(_CACHE_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    entry = payload.get(_KEYBOARD_CACHE_KEY) if isinstance(payload, dict) else None
+    if not isinstance(entry, dict):
+        return
+    try:
+        percent = int(entry["battery"])
+        age = max(0.0, time.time() - float(entry["saved_at"]))
+    except (KeyError, TypeError, ValueError):
+        return
+    if age > 86400 or not 0 <= percent <= 100:
+        return
+    with _KEYBOARD_LOCK:
+        _KEYBOARD_VALUES.extend([percent] * _KEYBOARD_HISTORY)
+        _KEYBOARD_CLOCK = str(entry.get("captured_clock", ""))
 
 
 class KeyboardBroadcastListener:
-    """Listen to the 0xFF60 vendor stream that carries the battery byte.
-
-    Like the mouse this device answers no request, so the value can only be
-    observed passively. The listener never sends a report.
-    """
+    """Passively record the vendor stream; never sends a report."""
 
     def __init__(self, vendor_id: int, product_id: int) -> None:
         self.vendor_id = vendor_id
@@ -433,15 +474,17 @@ class KeyboardBroadcastListener:
         return None
 
     def _handle(self, data: list[int]) -> None:
-        raw = [int(value) for value in data]
-        percent = parse_keyboard_battery(raw)
-        if percent is None:
+        global _KEYBOARD_CLOCK, _KEYBOARD_REPORTS
+        value = parse_keyboard_battery([int(v) for v in data])
+        if value is None:
             return
         with _KEYBOARD_LOCK:
-            _KEYBOARD_STATE["percent"] = percent
-            _KEYBOARD_STATE["raw"] = tuple(raw)
-            _KEYBOARD_STATE["clock"] = datetime.now().strftime("%H:%M")
-            _KEYBOARD_STATE["reports"] = int(_KEYBOARD_STATE["reports"]) + 1
+            _KEYBOARD_VALUES.append(value)
+            del _KEYBOARD_VALUES[:-_KEYBOARD_HISTORY]
+            _KEYBOARD_CLOCK = datetime.now().strftime("%H:%M")
+            _KEYBOARD_REPORTS += 1
+            smoothed = _median(_KEYBOARD_VALUES)
+        _save_keyboard_reading(smoothed, _KEYBOARD_CLOCK)
 
 
 def start_keyboard_listener(
@@ -464,11 +507,12 @@ def stop_keyboard_listener() -> None:
             _KEYBOARD_LISTENER = None
 
 
+_load_keyboard_reading()
+
+
 def read_keyboard_battery() -> tuple[int, str] | None:
-    """Return (percent, captured clock) from the vendor broadcast, if seen."""
+    """Return the median of recent readings, or None before any report."""
     with _KEYBOARD_LOCK:
-        percent = _KEYBOARD_STATE["percent"]
-        clock = str(_KEYBOARD_STATE["clock"])
-    if percent is None:
-        return None
-    return int(percent), clock
+        if not _KEYBOARD_VALUES:
+            return None
+        return _median(_KEYBOARD_VALUES), _KEYBOARD_CLOCK
