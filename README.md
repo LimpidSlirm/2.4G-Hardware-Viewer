@@ -227,3 +227,11 @@ report only the laptop ACPI battery at 100%; the Bluetooth headset did not
 provide a battery percentage through these interfaces. Its Bluetooth
 `DEVPKEY_Device_PowerData` value is power-management metadata, not a battery
 percentage, so it is not used as one.
+
+The later headset test identified a different device: `ZhuAudio ZG2`
+(`4C4A:4155`). This is a USB composite audio device with speaker and
+microphone endpoints plus a user-control HID interface. The HID interface
+has no Feature Reports, and the device's Windows power properties expose only
+power-management metadata. No battery percentage was available through the
+tested read-only interfaces. The earlier HUAWEI result applies only to the
+Bluetooth earbuds and not to this USB headset.
