@@ -544,10 +544,22 @@ class OverlayWindow(QWidget):
         panel_layout = panel.layout()
         if panel_layout is not None:
             panel_layout.activate()
+            panel_layout.setGeometry(panel.rect())
         screen = self.screen()
         available = screen.availableGeometry().height() if screen else 1080
         limit = max(320, available - 80)
-        target = max(self.minimumHeight(), min(limit, panel.sizeHint().height()))
+        # sizeHint under-reports the mini panel, so take the larger of the hint
+        # and the layout's own minimum plus its margins.
+        hint = panel.sizeHint().height()
+        if panel_layout is not None:
+            margins = panel_layout.contentsMargins()
+            needed = (
+                panel_layout.minimumSize().height()
+                + margins.top()
+                + margins.bottom()
+            )
+            hint = max(hint, needed)
+        target = max(self.minimumHeight(), min(limit, hint))
         if target != self.height():
             self.resize(self.width(), target)
 
