@@ -179,3 +179,12 @@ candidate bytes `(100, 100, 100)` in three consecutive reads. Because this
 receiver exposes the keyboard and mouse together, the first value is currently
 shown as `键盘电量候选 100%`; it remains explicitly marked as a candidate until
 a controlled battery-change test confirms the byte mapping.
+
+## Disconnect test
+
+After the keyboard and headset were disconnected, `3554:FA09` disappeared
+from the HID inventory and its vendor battery probe returned no reading. The
+`24AE:1411` interfaces remained present, and Windows continued to enumerate
+the headset's Bluetooth/audio endpoints. This means the next mapping test must
+connect one peripheral at a time; Windows may retain audio endpoints after a
+Bluetooth device is disconnected.
