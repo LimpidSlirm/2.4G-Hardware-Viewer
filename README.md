@@ -146,3 +146,6 @@ the `立即刷新` button and `F5` still trigger an on-demand read.
 The detail view now identifies the device transport and, when present, its
 VID:PID. This is a read-only identification step for selecting a safe
 device-specific battery protocol; it does not send HID commands.
+
+The device list is scrollable and the overlay height is capped so a larger
+number of device entries cannot expand the window beyond the screen.

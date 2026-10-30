@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QHBoxLayout,
+    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -130,8 +131,23 @@ class OverlayWindow(QWidget):
         layout.setSpacing(6)
         layout.addWidget(title)
         layout.addWidget(self._subtitle)
-        layout.addLayout(self._device_layout)
-        layout.addStretch(1)
+        device_container = QWidget()
+        device_container.setLayout(self._device_layout)
+        device_scroll = QScrollArea()
+        device_scroll.setWidget(device_container)
+        device_scroll.setWidgetResizable(True)
+        device_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        device_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        device_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        device_scroll.setStyleSheet(
+            "QScrollArea { background: transparent; }"
+            " QScrollBar:vertical { width: 8px; }"
+        )
+        layout.addWidget(device_scroll, 1)
         layout.addWidget(self._selected_device)
         controls = QHBoxLayout()
         controls.addWidget(self._refresh_info)
@@ -143,6 +159,8 @@ class OverlayWindow(QWidget):
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.addWidget(panel)
+        self.setMinimumHeight(300)
+        self.setMaximumHeight(720)
 
     def refresh_devices(self) -> None:
         if self._discovery_thread is not None and self._discovery_thread.isRunning():
