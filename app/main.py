@@ -54,9 +54,10 @@ class OverlayWindow(QWidget):
             | Qt.WindowType.WindowStaysOnTopHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setMinimumSize(460, 300)
+        self.setMinimumWidth(460)
+        self.setMaximumWidth(520)
         self._build_ui()
-        self.adjustSize()
+        self.resize(500, 300)
         self._discovery_thread: Optional[DeviceDiscoveryThread] = None
         self._refresh_timer = QTimer(self)
         self._refresh_timer.timeout.connect(self.refresh_devices)
@@ -213,7 +214,7 @@ class OverlayWindow(QWidget):
         self._selected_device.setText(
             f"选中：{device.name}\n"
             f"类别：{device.category}  |  状态：{device.status}\n"
-            f"实例 ID：{device.instance_id}"
+            f"实例 ID：{device.instance_id.replace('\\\\', '\\\\\u200b')}"
         )
 
     def _add_device_label(self, text: str, style: str) -> QLabel:

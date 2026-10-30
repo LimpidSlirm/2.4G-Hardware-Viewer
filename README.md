@@ -116,4 +116,5 @@ Device discovery runs in a background Qt thread, so the transparent window
 remains responsive while an immediate or automatic refresh queries Windows.
 
 Clicking a device row shows its category, status, and Windows instance ID in
-the detail area below the device list.
+the detail area below the device list. Long instance IDs wrap inside the
+overlay instead of expanding the window horizontally.
