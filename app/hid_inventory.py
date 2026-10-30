@@ -91,6 +91,13 @@ class HidInventoryError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class FeatureReport:
+    interface: HidInterface
+    report_id: int
+    data: bytes
+
+
 def _configure_functions() -> tuple[ctypes.WinDLL, ctypes.WinDLL, ctypes.WinDLL]:
     setupapi = ctypes.WinDLL("setupapi", use_last_error=True)
     hid = ctypes.WinDLL("hid", use_last_error=True)
@@ -103,6 +110,12 @@ def _configure_functions() -> tuple[ctypes.WinDLL, ctypes.WinDLL, ctypes.WinDLL]
         ctypes.POINTER(_HIDD_ATTRIBUTES),
     ]
     hid.HidD_GetAttributes.restype = wintypes.BOOLEAN
+    hid.HidD_GetFeature.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_void_p,
+        wintypes.ULONG,
+    ]
+    hid.HidD_GetFeature.restype = wintypes.BOOLEAN
     hid.HidD_GetPreparsedData.argtypes = [
         wintypes.HANDLE,
         ctypes.POINTER(ctypes.c_void_p),
@@ -279,3 +292,50 @@ def enumerate_hid_interfaces() -> list[HidInterface]:
     finally:
         setupapi.SetupDiDestroyDeviceInfoList(device_info_set)
     return interfaces
+
+
+def read_feature_report(interface: HidInterface, report_id: int = 0) -> bytes | None:
+    if interface.feature_report_length <= 0:
+        return None
+    if not 0 <= report_id <= 0xFF:
+        raise ValueError("Report ID must be between 0 and 255.")
+
+    _, hid, kernel32 = _configure_functions()
+    handle = kernel32.CreateFileW(
+        interface.path,
+        0,
+        3,
+        None,
+        _OPEN_EXISTING,
+        0,
+        None,
+    )
+    if handle == _INVALID_HANDLE_VALUE:
+        return None
+    try:
+        report = (ctypes.c_ubyte * interface.feature_report_length)()
+        report[0] = report_id
+        if not hid.HidD_GetFeature(
+            handle,
+            ctypes.cast(report, ctypes.c_void_p),
+            interface.feature_report_length,
+        ):
+            return None
+        return bytes(report)
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def probe_feature_reports(
+    interfaces: list[HidInterface],
+    report_ids: range = range(0, 4),
+) -> list[FeatureReport]:
+    reports: list[FeatureReport] = []
+    for interface in interfaces:
+        if interface.feature_report_length <= 0:
+            continue
+        for report_id in report_ids:
+            data = read_feature_report(interface, report_id)
+            if data is not None:
+                reports.append(FeatureReport(interface, report_id, data))
+    return reports

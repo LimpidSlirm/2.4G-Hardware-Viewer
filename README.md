@@ -166,3 +166,9 @@ On the development computer, the inventory found 22 HID interfaces. The
 external keyboard/mouse interfaces use VID:PID `3554:FA09` and `24AE:1411`;
 17 matching interfaces were found, including 3 with Feature Reports. These
 interfaces are the next safe source for device-specific battery investigation.
+
+The first read-only Feature Report probe tried Report IDs `0` through `3`.
+Only one report responded: `093A:0255`, Usage `0x0D/0x05`, length 257,
+which belongs to the touchpad rather than the target external keyboard or
+mouse. The target `3554:FA09` and `24AE:1411` Feature Report interfaces did
+not return a report, so no battery value is inferred from this probe.
