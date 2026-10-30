@@ -91,3 +91,14 @@ Run the automatic startup smoke test:
 ```powershell
 python -m app.main --smoke-test
 ```
+
+## Step 4 verification
+
+The prototype now queries Windows Plug and Play devices through
+`Get-PnpDevice -PresentOnly` and displays matching audio endpoints, keyboards,
+and mice. On the development computer, the query returned 15 devices and all
+reported status `OK`.
+
+The current discovery layer only reads device identity and connection status.
+It does not capture keyboard input, mouse movement, audio content, or raw
+2.4G packets.
