@@ -147,7 +147,7 @@ class DeviceDiscoveryThread(QThread):
                 percent, clock = keyboard_battery
                 key = f"{KEYBOARD_VENDOR_ID:04X}:{KEYBOARD_PRODUCT_ID:04X}"
                 readings.setdefault(key, []).append(
-                    ("键盘", percent, f"厂商广播 · {clock}（实验性）")
+                    ("键盘", percent, f"厂商广播 · {clock}")
                 )
 
             mouse_status = read_mouse_battery()
