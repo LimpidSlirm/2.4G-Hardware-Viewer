@@ -102,3 +102,6 @@ reported status `OK`.
 The current discovery layer only reads device identity and connection status.
 It does not capture keyboard input, mouse movement, audio content, or raw
 2.4G packets.
+
+The device panel groups results by category, shows normal-status counts, and
+refreshes automatically every five seconds.
