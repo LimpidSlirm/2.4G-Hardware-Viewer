@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import threading
+import time
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import datetime
 
 from pywinusb import hid
 
@@ -59,6 +61,8 @@ class RapooStatus:
     dpi_y: int
     active_state: int
     battery_percent: int
+    captured_clock: str = ""
+    cached: bool = False
 
 
 def parse_rapoo_status(raw: list[int]) -> RapooStatus | None:
@@ -86,12 +90,45 @@ def parse_rapoo_status(raw: list[int]) -> RapooStatus | None:
     )
 
 
+_MOUSE_CACHE: dict[tuple[int, int], tuple[RapooStatus, float]] = {}
+_MOUSE_CACHE_LOCK = threading.Lock()
+
+
 def read_mouse_battery(
     vendor_id: int = 0x24AE,
     product_id: int = 0x1411,
     timeout_seconds: float = 8.0,
+    max_cache_age_seconds: float = 86400.0,
 ) -> RapooStatus | None:
-    """Listen for the passive Report 7 broadcast. Never sends a report."""
+    """Listen for the passive Report 7 broadcast. Never sends a report.
+
+    The mouse broadcasts at irregular intervals and stays silent while asleep,
+    so the last valid reading is reused instead of dropping back to unknown.
+    """
+    fresh = _listen_mouse_report(vendor_id, product_id, timeout_seconds)
+    if fresh is not None:
+        stamped = replace(
+            fresh, captured_clock=datetime.now().strftime("%H:%M"), cached=False
+        )
+        with _MOUSE_CACHE_LOCK:
+            _MOUSE_CACHE[(vendor_id, product_id)] = (stamped, time.monotonic())
+        return stamped
+
+    with _MOUSE_CACHE_LOCK:
+        entry = _MOUSE_CACHE.get((vendor_id, product_id))
+    if entry is None:
+        return None
+    status, stored_at = entry
+    if time.monotonic() - stored_at > max_cache_age_seconds:
+        return None
+    return replace(status, cached=True)
+
+
+def _listen_mouse_report(
+    vendor_id: int,
+    product_id: int,
+    timeout_seconds: float,
+) -> RapooStatus | None:
     for device in hid.HidDeviceFilter(
         vendor_id=vendor_id, product_id=product_id
     ).get_devices():

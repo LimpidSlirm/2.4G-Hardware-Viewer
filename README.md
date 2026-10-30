@@ -7,25 +7,47 @@ Windows 桌面浮层工具，实时查看已连接的 2.4G / USB / 蓝牙外设�
 ## 功能
 
 - 透明、无边框、置顶浮层，可拖动到任意位置
-- 设备按 `音频设备` / `键盘` / `鼠标` 三类分组展示
+- 默认以迷你电量窗启动（约 210 px 宽），只显示键盘与鼠标电量条
+- `Ctrl + Alt + B` 全局快捷键或双击迷你窗，切换到完整界面，再按一次回到迷你窗
+- 完整界面按 `音频设备` / `键盘` / `鼠标` 三类分组展示
 - 按物理设备合并：同一个 2.4G 接收器的键盘、鼠标、多媒体等 HID 集合只显示一行，可同时展示键盘与鼠标电量
 - 有电量的设备显示绿色电量条与百分比
 - 无电量的设备明确标注 `电量未公开`，不猜测、不伪造百分比
 - 每行显示状态圆点、设备名、VID:PID 与数据来源
 - 点击设备行展开详情，再次点击收起；不点击时不占用空间
+- 鼠标休眠时不广播报告，界面沿用最后一次有效读数并标注 `缓存 HH:MM`
 - 每 5 分钟自动刷新，也可随时手动刷新
 - 过滤笔记本内置 ACPI/PS-2 键盘、内置麦克风阵列与内置触摸板
-- 窗口高度随内容自适应，最大不超过屏幕可用高度，宽度固定 500 px
+- 窗口高度随内容自适应，最大不超过屏幕可用高度
+- 支持写入开机自启项（当前用户 `Run` 项，使用 `pythonw.exe` 无黑窗启动）
 
 ## 界面操作
 
 | 操作 | 效果 |
 | --- | --- |
+| `Ctrl + Alt + B` | 迷你窗 ⇄ 完整界面（全局生效） |
+| 双击窗口 | 迷你窗 ⇄ 完整界面 |
 | 拖动面板 | 移动窗口 |
 | 点击设备行 | 展开 / 收起该设备详情 |
-| `立即刷新` 或 `F5` | 立即重新读取设备 |
+| `F5` | 立即重新读取设备 |
 | `Ctrl + ↑` / `Ctrl + ↓` | 调整不透明度（35%–100%） |
 | `Esc` | 关闭窗口 |
+
+## 开机自启
+
+```powershell
+python -m app.main --install-autostart   # 写入自启项
+python -m app.main --remove-autostart    # 移除自启项
+```
+
+写入位置：
+
+```text
+HKCU\Software\Microsoft\Windows\CurrentVersion\Run
+  2.4G-Hardware-Viewer = "<pythonw.exe>" "<项目>\launch.pyw"
+```
+
+使用 `pythonw.exe`，开机时不会弹出控制台窗口。
 
 ## 技术框架
 
@@ -46,7 +68,10 @@ app/
   main.py               界面与交互层
   device_discovery.py   Windows 设备发现
   battery_protocols.py  厂商电量协议解析
+  hotkey.py             Win32 全局快捷键
+  autostart.py          开机自启项读写
   hid_inventory.py      HID 接口枚举与诊断（工具）
+launch.pyw              自启动用的无控制台入口
 requirements.txt
 ```
 
@@ -71,7 +96,18 @@ requirements.txt
 
 - `read_vendor_battery_candidates()`：读取键盘接收器 `3554:FA09` 的 Feature Report 6
 - `parse_rapoo_status()`：解析鼠标状态报告，并用 DPI 双轴做偏移自校验
-- `read_mouse_battery()`：被动监听鼠标 Input Report 7，超时无报告则返回空
+- `read_mouse_battery()`：被动监听鼠标 Input Report 7，静默时返回带 `cached` 标记的最后读数
+- `_listen_mouse_report()`：单次监听，不发送任何报告
+
+### `app/hotkey.py` — 全局快捷键
+
+- 通过 `RegisterHotKey` 注册系统级 hotkey，`QAbstractNativeEventFilter` 接收 `WM_HOTKEY`
+- 默认绑定 `Ctrl + Alt + B`，用于切换迷你/完整界面
+
+### `app/autostart.py` — 开机自启
+
+- 读写当前用户 `Run` 项，命令指向 `pythonw.exe` + `launch.pyw`
+- 提供安装、移除、读取三种操作
 
 ### `app/hid_inventory.py` — HID 诊断工具
 
@@ -150,7 +186,8 @@ pywinusb
 - 内置触摸板（`HID\UNIW...`）与内置键盘、麦克风阵列一样被过滤，不参与显示
 - 外设电量取决于设备是否暴露只读报告；Windows 通用 PnP 属性中的 `PowerData` 属于电源管理元数据，不能当作电量
 - 蓝牙耳机（如 HUAWEI FreeBuds SE 2）与普通 USB 音频设备目前读不到电量，Windows 设置中的合并电量未通过标准接口公开
-- 鼠标休眠时不发送报告，此时显示为无读数，不会误报 `0%`；移动鼠标即可重新取值
+- 鼠标休眠时不发送报告，此时沿用最后一次有效读数并标注 `缓存 HH:MM`；超过 24 小时未更新则回退为无读数，不会误报 `0%`
+- 电量缓存只保存在进程内存中，程序重启后需要一次新的广播才能恢复读数（移动鼠标即可触发）
 - 键盘报告的三个候选字节尚未逐字节独立验证，界面标注为“候选”
 - 不解析 2.4G 空中数据包，也不逆向未知设备协议
 - 全程只读：不发送 Output Report 或 Feature Report 写命令，不读取键盘按键内容或鼠标移动轨迹

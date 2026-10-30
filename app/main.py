@@ -19,8 +19,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .autostart import install_autostart, remove_autostart
 from .battery_protocols import read_mouse_battery, read_vendor_battery_candidates
 from .device_discovery import DeviceDiscoveryError, DeviceRecord, discover_devices
+from .hotkey import MOD_ALT, MOD_CONTROL, GlobalHotkey
+
+FULL_WIDTH = 500
+MINI_WIDTH = 210
+HOTKEY_ID = 0x2A17
+HOTKEY_VK_B = 0x42
 
 TITLE_COLOR = "#eef4fb"
 SUBTITLE_COLOR = "#93a3b8"
@@ -52,6 +59,14 @@ def _meta_text(device: DeviceRecord, readings: tuple[tuple[str, int, str], ...])
     return " / ".join(sources)
 
 
+def _primary_member(members: list[DeviceRecord]) -> DeviceRecord:
+    """The MI_00 interface carries the device's main function."""
+    for member in members:
+        if "MI_00" in member.instance_id.upper():
+            return member
+    return members[0]
+
+
 def _merged_name(
     member: DeviceRecord,
     categories: set[str],
@@ -66,16 +81,14 @@ def _merged_name(
     if roles == {"鼠标"}:
         return "无线鼠标"
     if {"键盘", "鼠标"} <= categories:
-        return "无线键鼠接收器"
-    if "键盘" in categories:
-        return "无线键盘"
-    return "无线鼠标"
+        return f"无线{member.category}"
+    return f"无线{member.category}"
 
 
 def _merge_by_device(
     devices: list[DeviceRecord],
     keyboard: tuple[str, int] | None,
-    mouse: tuple[str, int] | None,
+    mouse: tuple[str, int, str] | None,
 ) -> list[DeviceRecord]:
     """Collapse every HID collection of one physical device into a single row."""
     groups: dict[str, list[DeviceRecord]] = {}
@@ -85,29 +98,21 @@ def _merge_by_device(
 
     merged: list[DeviceRecord] = []
     for members in groups.values():
-        first = members[0]
+        primary = _primary_member(members)
         categories = {member.category for member in members}
         readings: list[tuple[str, int, str]] = []
-        if keyboard is not None and first.vid_pid == keyboard[0] and "键盘" in categories:
+        if keyboard is not None and primary.vid_pid == keyboard[0] and "键盘" in categories:
             readings.append(("键盘", keyboard[1], "厂商 HID 报告（候选）"))
-        if mouse is not None and first.vid_pid == mouse[0]:
-            readings.append(("鼠标", mouse[1], "厂商 HID 报告"))
-        roles = {reading[0] for reading in readings}
-        if "键盘" in roles:
-            category = "键盘"
-        elif "鼠标" in roles:
-            category = "鼠标"
-        elif "键盘" in categories:
-            category = "键盘"
-        elif "鼠标" in categories:
-            category = "鼠标"
-        else:
-            category = first.category
+        if mouse is not None and primary.vid_pid == mouse[0]:
+            readings.append(("鼠标", mouse[1], mouse[2]))
+        primary_category = primary.category
         merged.append(
             replace(
-                first,
-                category=category,
-                name=_merged_name(first, categories, roles),
+                primary,
+                category=primary_category,
+                name=_merged_name(
+                    primary, categories, {reading[0] for reading in readings}
+                ),
                 battery_percent=readings[0][1] if readings else None,
                 battery_source=readings[0][2] if readings else None,
                 battery_readings=tuple(readings),
@@ -132,11 +137,15 @@ class DeviceDiscoveryThread(QThread):
                 )
                 break
             mouse_status = read_mouse_battery()
-            mouse: tuple[str, int] | None = None
+            mouse: tuple[str, int, str] | None = None
             if mouse_status is not None:
+                source = "厂商 HID 报告"
+                if mouse_status.cached:
+                    source = f"厂商 HID 报告 · 缓存 {mouse_status.captured_clock}"
                 mouse = (
                     f"{mouse_status.vendor_id:04X}:{mouse_status.product_id:04X}",
                     mouse_status.battery_percent,
+                    source,
                 )
             self.devices_found.emit(_merge_by_device(devices, keyboard, mouse))
         except DeviceDiscoveryError as exc:
@@ -283,8 +292,10 @@ class OverlayWindow(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setWindowOpacity(self._opacity)
-        self.setFixedWidth(500)
+        self._compact = True
+        self.setFixedWidth(MINI_WIDTH)
         self._build_ui()
+        self._apply_mode()
         self._discovery_thread: Optional[DeviceDiscoveryThread] = None
         self._refresh_timer = QTimer(self)
         self._refresh_timer.timeout.connect(self.refresh_devices)
@@ -294,6 +305,7 @@ class OverlayWindow(QWidget):
     def _build_ui(self) -> None:
         panel = QWidget(self)
         panel.setObjectName("panel")
+        self._panel = panel
         panel.setStyleSheet(
             f"""
             QWidget#panel {{
@@ -357,7 +369,7 @@ class OverlayWindow(QWidget):
             """
         )
         self._refresh_button.clicked.connect(self.refresh_devices)
-        hint = QLabel("拖动移动 · 点击行查看详情 · Esc 关闭")
+        hint = QLabel("拖动移动 · 点击行查看详情 · Ctrl+Alt+B 切换 · Esc 关闭")
         hint.setStyleSheet(f"color: #6b7c92; font-size: 10px;")
 
         layout = QVBoxLayout(panel)
@@ -380,7 +392,30 @@ class OverlayWindow(QWidget):
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.addWidget(panel)
-        self.setMinimumHeight(200)
+
+        self._mini_layout = QVBoxLayout()
+        self._mini_layout.setSpacing(5)
+        mini_panel = QWidget(self)
+        mini_panel.setObjectName("miniPanel")
+        mini_panel.setStyleSheet(
+            f"""
+            QWidget#miniPanel {{
+                background-color: rgba(17, 23, 32, 235);
+                border: 1px solid rgba(148, 163, 184, 70);
+                border-radius: 10px;
+            }}
+            QLabel {{
+                color: {NAME_COLOR};
+            }}
+            """
+        )
+        mini_layout = QVBoxLayout(mini_panel)
+        mini_layout.setContentsMargins(10, 8, 10, 8)
+        mini_layout.setSpacing(4)
+        mini_layout.addLayout(self._mini_layout)
+        self._mini_panel = mini_panel
+        outer_layout.addWidget(mini_panel)
+        self.setMinimumHeight(60)
 
     def refresh_devices(self) -> None:
         if self._discovery_thread is not None and self._discovery_thread.isRunning():
@@ -410,6 +445,7 @@ class OverlayWindow(QWidget):
         self._refresh_info.setText(
             f"更新 {datetime.now().strftime('%H:%M:%S')} · 每 5 分钟 · 透明度 {round(self._opacity * 100)}%"
         )
+        self._render_mini(devices)
         self._replace_device_rows(devices)
 
     def _display_discovery_error(self, message: str) -> None:
@@ -418,6 +454,7 @@ class OverlayWindow(QWidget):
         self._refresh_info.setText(
             f"失败 {datetime.now().strftime('%H:%M:%S')} · 每 5 分钟 · 透明度 {round(self._opacity * 100)}%"
         )
+        self._render_mini([])
         self._replace_device_rows([f"错误：{message}"])
 
     def _discovery_finished(self) -> None:
@@ -474,15 +511,86 @@ class OverlayWindow(QWidget):
         self._restore_details(devices)
         self._fit_height()
 
+    def _active_panel(self) -> QWidget:
+        return self._mini_panel if self._compact else self._panel
+
     def _fit_height(self) -> None:
+        panel = self._active_panel()
+        panel_layout = panel.layout()
+        if panel_layout is not None:
+            panel_layout.activate()
         screen = self.screen()
         available = screen.availableGeometry().height() if screen else 1080
         limit = max(320, available - 80)
-        target = max(
-            self.minimumHeight(), min(limit, self.sizeHint().height())
-        )
+        target = max(self.minimumHeight(), min(limit, panel.sizeHint().height()))
         if target != self.height():
             self.resize(self.width(), target)
+
+    def _apply_mode(self) -> None:
+        self._mini_panel.setVisible(self._compact)
+        self._panel.setVisible(not self._compact)
+        self.setFixedWidth(MINI_WIDTH if self._compact else FULL_WIDTH)
+        self._fit_height()
+
+    def toggle_mode(self) -> None:
+        self._compact = not self._compact
+        self._apply_mode()
+        self.raise_()
+        self.activateWindow()
+
+    def _render_mini(self, devices: list[DeviceRecord]) -> None:
+        while self._mini_layout.count():
+            item = self._mini_layout.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+            elif item.layout() is not None:
+                child = item.layout()
+                while child.count():
+                    entry = child.takeAt(0)
+                    if entry.widget() is not None:
+                        entry.widget().deleteLater()
+
+        rows: list[tuple[str, int]] = []
+        for device in devices:
+            for label, percent, _source in device.battery_readings:
+                rows.append((label, percent))
+            if not device.battery_readings and device.battery_percent is not None:
+                rows.append((device.name, device.battery_percent))
+
+        if not rows:
+            empty = QLabel("暂无电量")
+            empty.setStyleSheet(f"color: {META_COLOR}; font-size: 10px;")
+            self._mini_layout.addWidget(empty)
+            return
+        for label, percent in rows:
+            self._mini_layout.addWidget(self._mini_row(label, percent))
+
+    def _mini_row(self, label: str, percent: int) -> QWidget:
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        tag = QLabel(label)
+        tag.setStyleSheet(f"color: {META_COLOR}; font-size: 10px;")
+        tag.setFixedWidth(30)
+        bar = QProgressBar()
+        bar.setRange(0, 100)
+        bar.setValue(max(0, min(100, percent)))
+        bar.setTextVisible(False)
+        bar.setFixedHeight(6)
+        bar.setStyleSheet(DeviceRow._BAR_STYLE)
+        value = QLabel(f"{percent}%")
+        value.setStyleSheet(
+            f"color: {GREEN_TEXT}; font-size: 11px; font-weight: 600;"
+        )
+        value.setFixedWidth(36)
+        value.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        layout.addWidget(tag)
+        layout.addWidget(bar, 1)
+        layout.addWidget(value)
+        return row
 
     def _add_device_row(self, device: DeviceRecord) -> DeviceRow:
         key = _device_key(device)
@@ -581,6 +689,13 @@ class OverlayWindow(QWidget):
         self._drag_offset = None
         super().mouseReleaseEvent(event)
 
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.toggle_mode()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
     def closeEvent(self, event) -> None:
         self._refresh_timer.stop()
         if self._discovery_thread is not None and self._discovery_thread.isRunning():
@@ -606,12 +721,24 @@ class OverlayWindow(QWidget):
 
 
 def main() -> int:
+    if "--install-autostart" in sys.argv:
+        print(f"已设置开机自启：{install_autostart()}")
+        return 0
+    if "--remove-autostart" in sys.argv:
+        print("已取消开机自启" if remove_autostart() else "当前没有开机自启项")
+        return 0
+
     app = QApplication(sys.argv)
     window = OverlayWindow()
     available_geometry = app.primaryScreen().availableGeometry()
     position = available_geometry.topLeft() + QPoint(40, 40)
     window.move(position)
     window.show()
+
+    hotkey = GlobalHotkey(
+        HOTKEY_ID, MOD_CONTROL | MOD_ALT, HOTKEY_VK_B, window.toggle_mode
+    )
+    app.installNativeEventFilter(hotkey)
 
     if "--smoke-test" in sys.argv:
         if window._discovery_thread is not None:
