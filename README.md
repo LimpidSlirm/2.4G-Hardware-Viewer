@@ -235,3 +235,12 @@ has no Feature Reports, and the device's Windows power properties expose only
 power-management metadata. No battery percentage was available through the
 tested read-only interfaces. The earlier HUAWEI result applies only to the
 Bluetooth earbuds and not to this USB headset.
+
+Windows Bluetooth settings can display a combined `100%` battery indicator
+for the HUAWEI FreeBuds SE 2 when it is connected. The settings view shows
+one value rather than separate left- and right-earbud values. The device is
+enumerated through classic Bluetooth audio services (A2DP, AVRCP, and HFP),
+and the tested PnP/WMI interfaces do not expose separate earbud batteries.
+The application must not split the combined value into two invented
+percentages; left/right support requires locating the device-specific
+Bluetooth battery protocol or another API that exposes both channels.
