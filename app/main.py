@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QHBoxLayout,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -37,6 +38,10 @@ class DeviceLabel(QLabel):
         self._device = device
         self.setStyleSheet(style)
         self.setWordWrap(True)
+        self.setMinimumWidth(0)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
@@ -57,8 +62,7 @@ class OverlayWindow(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setWindowOpacity(self._opacity)
-        self.setMinimumWidth(460)
-        self.setMaximumWidth(520)
+        self.setFixedWidth(500)
         self._build_ui()
         self.resize(500, 300)
         self._discovery_thread: Optional[DeviceDiscoveryThread] = None
@@ -91,6 +95,10 @@ class OverlayWindow(QWidget):
         self._device_layout.setSpacing(4)
         self._selected_device = QLabel("点击设备查看详情")
         self._selected_device.setWordWrap(True)
+        self._selected_device.setMinimumWidth(0)
+        self._selected_device.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
         self._selected_device.setStyleSheet(
             "color: #b7c5d8; background: rgba(36, 45, 59, 180);"
             " border-radius: 5px; padding: 6px;"
@@ -230,6 +238,10 @@ class OverlayWindow(QWidget):
         label = QLabel(text)
         label.setStyleSheet(style)
         label.setWordWrap(True)
+        label.setMinimumWidth(0)
+        label.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
         self._device_layout.addWidget(label)
         return label
 
