@@ -1,285 +1,153 @@
-# 2.4G-Hardware-Viewer
+# 2.4G Hardware Viewer
 
-Windows hardware status viewer for connected audio, keyboard, and mouse devices.
+Windows 桌面浮层工具，实时查看已连接的 2.4G / USB / 蓝牙外设，并读取键盘、鼠标的真实电量。
 
-## Current scope
+只读取系统已公开的数据和设备厂商自有的只读报告，不抓取 2.4G 空中射频包，不发送任何 HID 写命令。
 
-The first version reads device information already exposed by Windows. It does
-not capture raw 2.4G radio packets from the air.
+## 功能
 
-The target devices are:
+- 透明、无边框、置顶浮层，可拖动到任意位置
+- 设备按 `音频设备` / `键盘` / `鼠标` 三类分组展示
+- 电量直接合并到对应设备行，同一台设备只出现一行，不额外新增条目
+- 有电量的设备显示绿色电量条与百分比
+- 无电量的设备明确标注 `电量未公开`，不猜测、不伪造百分比
+- 每行显示状态圆点、设备名、VID:PID 与连接方式
+- 点击设备行展开详情，再次点击收起；不点击时不占用空间
+- 每 5 分钟自动刷新，也可随时手动刷新
+- 过滤笔记本内置 ACPI/PS-2 键盘与内置麦克风阵列
+- 窗口高度随内容自适应，上限 720 px，宽度固定 500 px
 
-- Headset or other audio endpoints
-- Keyboard
-- Mouse
+## 界面操作
 
-## Step 1 verification
+| 操作 | 效果 |
+| --- | --- |
+| 拖动面板 | 移动窗口 |
+| 点击设备行 | 展开 / 收起该设备详情 |
+| `立即刷新` 或 `F5` | 立即重新读取设备 |
+| `Ctrl + ↑` / `Ctrl + ↓` | 调整不透明度（35%–100%） |
+| `Esc` | 关闭窗口 |
 
-On the development computer, Windows currently enumerates:
+## 技术框架
 
-- HUAWEI FreeBuds SE 2 audio endpoints and media devices
-- HID and USB keyboard devices
-- HID mouse devices
+| 层 | 技术 |
+| --- | --- |
+| 语言 | Python 3.13 |
+| 界面 | PySide6（Qt 6） |
+| 设备枚举 | Windows PowerShell `Get-PnpDevice` |
+| 厂商电量协议 | `pywinusb`（HID 只读） |
+| HID 诊断 | `ctypes` 直调 `hid.dll` / `setupapi.dll` |
+| 预留扩展 | `pyserial`（串口型设备） |
 
-All inspected matching devices reported status `OK`.
-
-## Known limitations
-
-The information available to the application depends on the device and its
-Windows driver. Connection state and device identity are expected to be
-available; battery, signal quality, latency, and vendor-specific details may
-not be exposed.
-
-## Technical direction
-
-The project will use:
-
-- Python 3.13
-- PySide6 for the Windows desktop user interface
-- pywin32 for Windows device and system interfaces
-- pyserial only if a future supported device exposes a serial interface
-
-The application targets Windows first. The .NET/WPF option was considered, but
-the current development environment has a usable Python GUI and Windows API
-stack already installed, so Python is the lower-friction choice for the first
-working version.
-
-## Step 2 verification
-
-The development environment currently provides:
-
-- Python 3.13.9 through the active `python` command
-- PySide6 6.9.2
-- pywin32
-- pyserial 3.5
-- Tkinter as a fallback standard-library GUI toolkit
-
-These components are sufficient to create and run the initial desktop
-application without installing additional packages.
-
-## Interface direction
-
-The application uses a transparent overlay window that:
-
-- Has no standard Windows border or title bar
-- Stays above other windows
-- Can be moved by dragging the visible panel
-- Closes with the `Esc` key during the prototype stage
-
-The transparent overlay is the initial shell. Device status cards and controls
-will be added without changing this window behavior.
-
-## Project structure
+## 模块结构
 
 ```text
 app/
   __init__.py
-  main.py
+  main.py               界面与交互层
+  device_discovery.py   Windows 设备发现
+  battery_protocols.py  厂商电量协议解析
+  hid_inventory.py      HID 接口枚举与诊断（工具）
 requirements.txt
 ```
 
-## Step 3 verification
+### `app/main.py` — 界面层
 
-Run the prototype from the project directory:
+- `OverlayWindow`：透明浮层主窗口，负责分组渲染、详情面板、快捷键与定时刷新
+- `DeviceDiscoveryThread`：`QThread` 后台线程，避免查询设备时界面卡顿
+- `DeviceRow`：单台设备的行控件，包含状态圆点、电量条与百分比
+- `_attach_battery()`：把协议读取到的电量挂到匹配的 PnP 设备行上；找不到对应设备时才单独列出
+- 配色常量与 `_status_color()` / `_source_text()` 统一管理视觉语义：
+  绿色 = 已确认读取或在线，黄色 = 候选未完全验证，红色 = 异常
+
+### `app/device_discovery.py` — 设备发现
+
+- 调用 PowerShell 查询 `AudioEndpoint`、`Keyboard`、`Mouse` 三类 PnP 设备
+- `DeviceRecord` 数据模型：类别、名称、状态、实例 ID、电量
+- 派生属性 `transport`（USB / HID / 蓝牙 / Windows 音频端点）与 `vid_pid`
+- 过滤内置键盘与麦克风阵列，并对同一物理设备的多接口条目去重
+
+### `app/battery_protocols.py` — 电量协议
+
+- `read_vendor_battery_candidates()`：读取键盘接收器 `3554:FA09` 的 Feature Report 6
+- `parse_rapoo_status()`：解析鼠标状态报告，并用 DPI 双轴做偏移自校验
+- `read_mouse_battery()`：被动监听鼠标 Input Report 7，超时无报告则返回空
+
+### `app/hid_inventory.py` — HID 诊断工具
+
+只读枚举系统中的 HID 接口，输出 VID/PID、Usage Page、Usage 以及各类报告长度，
+并可在安全范围内读取 Feature Report。该模块不参与日常界面流程，用于排查新设备的协议入口。
+
+## 数据流
+
+```text
+定时器(5 分钟) / 刷新按钮 / F5
+        │
+        ▼
+DeviceDiscoveryThread (QThread)
+        │  discover_devices()        → PowerShell → PnP 设备列表
+        │  read_vendor_battery_candidates() → 3554:FA09 Feature Report 6
+        │  read_mouse_battery()      → 24AE:1411 Input Report 7
+        │  _attach_battery()         → 按 VID:PID 合并到对应设备行
+        ▼
+list[DeviceRecord] ──Qt 信号──► OverlayWindow
+        │
+        ▼
+分组渲染 DeviceRow → 电量条 / 详情面板
+```
+
+## 已支持的设备协议
+
+| 设备 | VID:PID | 读取方式 | 字段 |
+| --- | --- | --- | --- |
+| 无线键盘接收器 | `3554:FA09` | Feature Report 6（只读） | 字节 `[3..5]` 为候选电量，当前三个值均一致 |
+| 无线鼠标 | `24AE:1411` | Input Report 7（被动接收） | `[7]` 状态标志、`[8]` 电量百分比 |
+
+鼠标报告的偏移通过 DPI 自校验确认：
+
+```text
+[7, 16, 3, 64, 6, 64, 6, 1, 100, 0, 2, 2, 0]
+ |   |  |  └─┬─┘ └─┬─┘  |   └─ 电量 100%
+ |   |  |   X=1600  Y=1600  状态
+ |   |  DPI 档位
+ |   设备标识
+ Report ID 7
+```
+
+`[3..4]` 与 `[5..6]` 解出 `1600 x 1600`，两轴同时落在合理范围才认为偏移正确，否则丢弃该报告。
+
+## 运行
+
+需在项目目录内执行：
 
 ```powershell
 python -m app.main
 ```
 
-Run the automatic startup smoke test:
+启动自检（不显示窗口，仅验证初始化）：
 
 ```powershell
 python -m app.main --smoke-test
 ```
 
-## Step 4 verification
+## 环境依赖
 
-The prototype now queries Windows Plug and Play devices through
-`Get-PnpDevice -PresentOnly` and displays matching audio endpoints, keyboards,
-and mice. On the development computer, the query returned 15 devices and all
-reported status `OK`.
-
-The current discovery layer only reads device identity and connection status.
-It does not capture keyboard input, mouse movement, audio content, or raw
-2.4G packets.
-
-The device panel groups results by category, removes repeated display entries
-that represent the same category, name, and status, shows normal-status counts,
-and refreshes automatically every five seconds. The underlying Windows
-instance IDs are retained for future detail views.
-
-The panel also provides an immediate refresh button. Hovering over a device
-shows its Windows instance ID without adding the technical identifier to the
-main display.
-
-Device discovery runs in a background Qt thread, so the transparent window
-remains responsive while an immediate or automatic refresh queries Windows.
-
-Clicking a device row shows its category, status, and Windows instance ID in
-the detail area below the device list. Long instance IDs wrap inside the
-overlay instead of expanding the window horizontally.
-
-The overlay supports `F5` for an immediate refresh. `Ctrl+Up` and `Ctrl+Down`
-increase or decrease opacity between 35% and 100%; `Esc` closes the window.
-The panel displays the most recent refresh time and current opacity.
-
-## Battery readings
-
-The discovery query also checks the Windows ACPI battery. Peripheral battery
-levels are shown as `未知（Windows 未公开）` unless Windows exposes a
-device-specific battery value; the application does not infer a percentage
-from connection or power-management data. On the development computer, the
-system battery reports 100%, while the connected headset, keyboard, and mouse
-do not currently expose a percentage through the tested generic PnP properties.
-
-The reference project
-[`2.4G-battery-viewer`](https://github.com/yszyszysz233/2.4G-battery-viewer)
-uses device-specific HID protocols for VID:PID `373B:1216` and `3654:6901`.
-The development computer currently exposes `3554:FA09` and `24AE:1411` for
-its HID keyboard/mouse devices, and the headset appears as a Bluetooth device,
-so those reference commands are not applied automatically.
-
-The discovery view excludes the laptop's ACPI/PS/2 keyboard and the built-in
-microphone array. Automatic Windows device reading runs every five minutes;
-the `立即刷新` button and `F5` still trigger an on-demand read.
-
-The detail view now identifies the device transport and, when present, its
-VID:PID. This is a read-only identification step for selecting a safe
-device-specific battery protocol; it does not send HID commands.
-
-The device list no longer uses a scroll area; the overlay sizes itself to the
-number of rows and caps at 720 px. Rows are grouped as `音频设备`, `键盘`, and
-`鼠标`, and each row shows a status dot, the device name, its VID:PID and
-transport, and either a green battery bar with the percentage or a
-`电量未公开` note. Clicking a row expands a detail panel below the list;
-clicking the same row again collapses it, and the panel stays hidden until a
-row is clicked. The system battery is no longer queried or displayed.
-
-The application still calculates how many peripheral battery values were read
-and how many remain undisclosed by Windows, but this summary is hidden from the
-overlay to keep the panel compact.
-
-## HID battery investigation
-
-The project now includes a read-only HID inventory using the Windows HID and
-SetupAPI DLLs. It records VID:PID, Usage Page, Usage, and input/output/Feature
-Report lengths without sending reports or reading input events.
-
-On the development computer, the inventory found 22 HID interfaces. The
-external keyboard/mouse interfaces use VID:PID `3554:FA09` and `24AE:1411`;
-17 matching interfaces were found, including 3 with Feature Reports. These
-interfaces are the next safe source for device-specific battery investigation.
-
-The first read-only Feature Report probe tried Report IDs `0` through `3`.
-Only one report responded: `093A:0255`, Usage `0x0D/0x05`, length 257,
-which belongs to the touchpad rather than the target external keyboard or
-mouse. The target `3554:FA09` and `24AE:1411` Feature Report interfaces did
-not return a report, so no battery value is inferred from this probe.
-
-The current vendor probe can read `3554:FA09` Report 6 through `pywinusb`
-without sending a report. On the development computer it returned stable
-candidate bytes `(100, 100, 100)` in three consecutive reads. Because this
-receiver exposes the keyboard and mouse together, the first value is currently
-shown as `键盘电量候选 100%`; it remains explicitly marked as a candidate until
-a controlled battery-change test confirms the byte mapping.
-
-The connection comparison now identifies this receiver as the keyboard path:
-when the keyboard was disconnected, `3554:FA09` disappeared and Report 6
-returned no data; when only the keyboard was connected, it reappeared and
-returned the same raw report three times:
-
-```text
-[6, 0, 2, 100, 100, 100, 53, 21]
+```powershell
+python -m pip install -r requirements.txt
 ```
 
-This confirms the association with the keyboard receiver and supports the
-current full-charge observation. The exact meaning of each of the three
-candidate bytes is still not independently confirmed because no discharge
-measurement has been performed.
-
-## Disconnect test
-
-After the keyboard and headset were disconnected, `3554:FA09` disappeared
-from the HID inventory and its vendor battery probe returned no reading. The
-`24AE:1411` interfaces remained present, and Windows continued to enumerate
-the headset's Bluetooth/audio endpoints. This means the next mapping test must
-connect one peripheral at a time; Windows may retain audio endpoints after a
-Bluetooth device is disconnected.
-
-With only the mouse connected, the active target was `24AE:1411` (`Rapoo
-Gaming Device`). Its HID interfaces declared 33-byte Feature Reports. A
-read-only probe returned an incompatible-report-ID error for Report 8 and 33
-zero bytes for Report 9. These values are not treated as a battery reading:
-zero may be protocol data or an unsupported report, not 0% battery. The
-existing `3554:FA09` battery reader correctly returned no result in this
-configuration.
-
-The report descriptor inspection also found that both reports expose only the
-vendor Usage `0xFF00/0x0003` as a 32-byte raw field. No standard HID Battery
-Strength usage was present. Because the current evidence does not identify a
-battery byte, the application does not send an output report or vendor command
-to this mouse and continues to show its battery as undisclosed.
-
-## Mouse battery report
-
-The current mouse (`24AE:1411`, Rapoo Gaming Device) uses a different protocol
-from the reference screenshot's `373B:1216` command protocol. It passively
-sends Input Report 7 on its `UsagePage 0xFF00 / Usage 0x0002` interface. A
-captured report was:
-
 ```text
-[7, 16, 3, 64, 6, 64, 6, 1, 99, 0, 2, 2, 0]
+PySide6==6.9.2
+pyserial==3.5
+pywin32
+pywinusb
 ```
 
-Field layout used by the reader:
+## 已知限制
 
-| Offset | Meaning |
-| --- | --- |
-| `[0]` | Report ID `0x07` |
-| `[1]` | Device/receiver identifier |
-| `[2]` | DPI profile index |
-| `[3..4]` | X DPI, 16-bit little-endian |
-| `[5..6]` | Y DPI, 16-bit little-endian |
-| `[7]` | Active state flag |
-| `[8]` | Battery percentage, `0x00`-`0x64` |
-
-The offsets are validated at runtime through the DPI pair, which decoded to a
-plausible `1600 x 1600`; a report whose DPI pair is implausible is rejected
-instead of being read as battery. Observed battery values were `99` and `100`
-across separate samples, so the byte is live rather than a fixed placeholder.
-The device is `24AE:1411` with a 13-byte report while the published Rapoo VT7
-documentation describes `24AE:1413` with a 19-byte report, and the device
-identifier byte is `0x10` instead of `0x20`; the shared offsets still decode
-consistently, including the DPI self-check.
-
-The application only listens for this passive report and never sends an Output
-or Feature Report. The mouse may be asleep and emit no report until it is
-moved; no report is treated as an unknown value, not as 0%.
-
-## Headset connection test
-
-After connecting the HUAWEI FreeBuds SE 2, Windows enumerated the Bluetooth
-device and its A2DP, AVRCP, and Hands-Free services. It did not enumerate the
-reference project's `3654:6901` receiver, and no new HID battery interface
-appeared. `Win32_Battery` and the WMI `BatteryStatus` query continued to
-report only the laptop ACPI battery at 100%; the Bluetooth headset did not
-provide a battery percentage through these interfaces. Its Bluetooth
-`DEVPKEY_Device_PowerData` value is power-management metadata, not a battery
-percentage, so it is not used as one.
-
-The later headset test identified a different device: `ZhuAudio ZG2`
-(`4C4A:4155`). This is a USB composite audio device with speaker and
-microphone endpoints plus a user-control HID interface. The HID interface
-has no Feature Reports, and the device's Windows power properties expose only
-power-management metadata. No battery percentage was available through the
-tested read-only interfaces. The earlier HUAWEI result applies only to the
-Bluetooth earbuds and not to this USB headset.
-
-Windows Bluetooth settings can display a combined `100%` battery indicator
-for the HUAWEI FreeBuds SE 2 when it is connected. The settings view shows
-one value rather than separate left- and right-earbud values. The device is
-enumerated through classic Bluetooth audio services (A2DP, AVRCP, and HFP),
-and the tested PnP/WMI interfaces do not expose separate earbud batteries.
-The application must not split the combined value into two invented
-percentages; left/right support requires locating the device-specific
-Bluetooth battery protocol or another API that exposes both channels.
+- 仅支持 Windows
+- 外设电量取决于设备是否暴露只读报告；Windows 通用 PnP 属性中的 `PowerData` 属于电源管理元数据，不能当作电量
+- 蓝牙耳机（如 HUAWEI FreeBuds SE 2）与普通 USB 音频设备目前读不到电量，Windows 设置中的合并电量未通过标准接口公开
+- 鼠标休眠时不发送报告，此时显示为无读数，不会误报 `0%`；移动鼠标即可重新取值
+- 键盘报告的三个候选字节尚未逐字节独立验证，界面标注为“候选”
+- 不解析 2.4G 空中数据包，也不逆向未知设备协议
+- 全程只读：不发送 Output Report 或 Feature Report 写命令，不读取键盘按键内容或鼠标移动轨迹

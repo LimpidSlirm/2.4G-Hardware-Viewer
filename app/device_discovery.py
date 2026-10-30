@@ -13,6 +13,7 @@ class DeviceRecord:
     status: str
     instance_id: str
     battery_percent: int | None = None
+    battery_source: str | None = None
 
     @property
     def transport(self) -> str:

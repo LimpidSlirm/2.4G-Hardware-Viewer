@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import sys
+from dataclasses import replace
 from datetime import datetime
 from typing import Optional
 
@@ -32,6 +33,8 @@ RED_COLOR = "#f87171"
 GREEN_COLOR = "#4ade80"
 GREEN_TEXT = "#6ee7a0"
 
+DeviceKey = tuple[str, str, str, str]
+
 
 def _status_color(status: str) -> str:
     normalized = status.upper()
@@ -43,11 +46,37 @@ def _status_color(status: str) -> str:
 
 
 def _source_text(device: DeviceRecord) -> str:
-    if device.instance_id == "mouse-input-report":
-        return "厂商 HID 报告"
-    if device.instance_id == "vendor-feature-report":
-        return "厂商 HID 报告（候选）"
-    return device.transport
+    return device.battery_source or device.transport
+
+
+def _attach_battery(
+    devices: list[DeviceRecord],
+    category: str,
+    vid_pid: str,
+    battery_percent: int,
+    source: str,
+) -> tuple[list[DeviceRecord], bool]:
+    """Attach a reading to the matching device row instead of adding a new one."""
+    updated: list[DeviceRecord] = []
+    matched = False
+    for device in devices:
+        if (
+            not matched
+            and device.category == category
+            and device.vid_pid == vid_pid
+            and device.battery_percent is None
+        ):
+            updated.append(
+                replace(
+                    device,
+                    battery_percent=battery_percent,
+                    battery_source=source,
+                )
+            )
+            matched = True
+            continue
+        updated.append(device)
+    return updated, matched
 
 
 
@@ -59,33 +88,59 @@ class DeviceDiscoveryThread(QThread):
         try:
             devices = discover_devices()
             for reading in read_vendor_battery_candidates():
-                devices.append(
-                    DeviceRecord(
-                        category="键盘",
-                        name="无线键盘",
-                        status="候选",
-                        instance_id="vendor-feature-report",
-                        battery_percent=reading.values[0],
-                    )
+                devices, matched = _attach_battery(
+                    devices,
+                    category="键盘",
+                    vid_pid=f"{reading.vendor_id:04X}:{reading.product_id:04X}",
+                    battery_percent=reading.values[0],
+                    source="厂商 HID 报告（候选）",
                 )
+                if not matched:
+                    devices.append(
+                        DeviceRecord(
+                            category="键盘",
+                            name="无线键盘",
+                            status="候选",
+                            instance_id="vendor-feature-report",
+                            battery_percent=reading.values[0],
+                            battery_source="厂商 HID 报告（候选）",
+                        )
+                    )
             mouse_status = read_mouse_battery()
             if mouse_status is not None:
-                devices.append(
-                    DeviceRecord(
-                        category="鼠标",
-                        name=f"无线鼠标（{mouse_status.dpi_x} DPI）",
-                        status="已读取",
-                        instance_id="mouse-input-report",
-                        battery_percent=mouse_status.battery_percent,
-                    )
+                devices, matched = _attach_battery(
+                    devices,
+                    category="鼠标",
+                    vid_pid=f"{mouse_status.vendor_id:04X}:"
+                    f"{mouse_status.product_id:04X}",
+                    battery_percent=mouse_status.battery_percent,
+                    source=f"厂商 HID 报告 · {mouse_status.dpi_x} DPI",
                 )
+                if not matched:
+                    devices.append(
+                        DeviceRecord(
+                            category="鼠标",
+                            name=f"无线鼠标（{mouse_status.dpi_x} DPI）",
+                            status="已读取",
+                            instance_id="mouse-input-report",
+                            battery_percent=mouse_status.battery_percent,
+                            battery_source="厂商 HID 报告",
+                        )
+                    )
             self.devices_found.emit(devices)
         except DeviceDiscoveryError as exc:
             self.discovery_failed.emit(str(exc))
 
 
-def _device_key(device: DeviceRecord) -> tuple[str, str, str]:
-    return (device.category, device.name.casefold(), device.status.casefold())
+def _device_key(device: DeviceRecord) -> DeviceKey:
+    # VID:PID keeps two different keyboards or mice from collapsing into one row,
+    # while interfaces of the same device still dedupe.
+    return (
+        device.category,
+        device.name.casefold(),
+        device.status.casefold(),
+        device.vid_pid or "",
+    )
 
 
 class DeviceRow(QFrame):
@@ -181,8 +236,8 @@ class OverlayWindow(QWidget):
         super().__init__()
         self._drag_offset: Optional[QPoint] = None
         self._opacity = 0.92
-        self._detail_key: Optional[tuple[str, str, str]] = None
-        self._device_rows: dict[tuple[str, str, str], DeviceRow] = {}
+        self._detail_key: Optional[DeviceKey] = None
+        self._device_rows: dict[DeviceKey, DeviceRow] = {}
         self.setWindowTitle("Hardware Viewer")
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -337,7 +392,7 @@ class OverlayWindow(QWidget):
     @staticmethod
     def _unique_display_devices(devices: list[DeviceRecord]) -> list[DeviceRecord]:
         unique_devices: list[DeviceRecord] = []
-        seen: set[tuple[str, str, str]] = set()
+        seen: set[DeviceKey] = set()
         for device in devices:
             key = _device_key(device)
             if key in seen:
@@ -383,7 +438,11 @@ class OverlayWindow(QWidget):
         self._fit_height()
 
     def _fit_height(self) -> None:
-        self.adjustSize()
+        target = max(
+            self.minimumHeight(), min(self.maximumHeight(), self.sizeHint().height())
+        )
+        if target != self.height():
+            self.resize(self.width(), target)
 
     def _add_device_row(self, device: DeviceRecord) -> DeviceRow:
         key = _device_key(device)
