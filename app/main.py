@@ -92,6 +92,8 @@ class OverlayWindow(QWidget):
         title.setFont(QFont("Segoe UI", 13, QFont.Weight.DemiBold))
         self._subtitle = QLabel("正在读取 Windows 设备...")
         self._subtitle.setStyleSheet("color: #aab6c8;")
+        self._battery_summary = QLabel()
+        self._battery_summary.setVisible(False)
         self._device_layout = QVBoxLayout()
         self._device_layout.setSpacing(4)
         self._selected_device = QLabel("点击设备查看详情")
@@ -131,6 +133,7 @@ class OverlayWindow(QWidget):
         layout.setSpacing(6)
         layout.addWidget(title)
         layout.addWidget(self._subtitle)
+        layout.addWidget(self._battery_summary)
         device_container = QWidget()
         device_container.setLayout(self._device_layout)
         device_scroll = QScrollArea()
@@ -184,7 +187,9 @@ class OverlayWindow(QWidget):
         peripheral_count = sum(device.category != "本机电池" for device in devices)
         unknown_battery_count = peripheral_count - readable_battery_count
         self._subtitle.setText(
-            f"已发现 {len(devices)} 个设备  |  正常 {online_count}\n"
+            f"已发现 {len(devices)} 个设备  |  正常 {online_count}"
+        )
+        self._battery_summary.setText(
             f"外设电量：已读取 {readable_battery_count}  |  未公开 {unknown_battery_count}"
         )
         self._refresh_info.setText(
@@ -194,6 +199,7 @@ class OverlayWindow(QWidget):
 
     def _display_discovery_error(self, message: str) -> None:
         self._subtitle.setText("设备读取失败")
+        self._battery_summary.setText("外设电量：读取失败")
         self._refresh_info.setText(
             f"失败：{datetime.now().strftime('%H:%M:%S')}  |  自动刷新：5 分钟  |  透明度：{round(self._opacity * 100)}%"
         )

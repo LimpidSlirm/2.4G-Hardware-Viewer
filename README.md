@@ -150,7 +150,8 @@ device-specific battery protocol; it does not send HID commands.
 The device list is scrollable and the overlay height is capped so a larger
 number of device entries cannot expand the window beyond the screen.
 
-The summary reports how many peripheral battery values were read and how many
-remain undisclosed by Windows. Each row also shows the current battery source:
+The application still calculates how many peripheral battery values were read
+and how many remain undisclosed by Windows, but this summary is hidden from the
+overlay to keep the panel compact. Each row shows the current battery source:
 `Win32_Battery` for the system battery, `Windows` for a device-specific value,
 or `待探测` when a vendor/HID protocol has not yet been identified.
