@@ -510,13 +510,13 @@ class OverlayWindow(QWidget):
         if not devices:
             self._add_device_label("未发现设备", f"color: {META_COLOR}; font-size: 11px;")
             self._hide_details()
-            self._fit_height()
+            self._schedule_fit()
             return
         if isinstance(devices[0], str):
             for row in devices:
                 self._add_device_label(str(row), f"color: {RED_COLOR}; font-size: 11px;")
             self._hide_details()
-            self._fit_height()
+            self._schedule_fit()
             return
 
         category_order = ("音频设备", "键盘", "鼠标")
@@ -534,7 +534,7 @@ class OverlayWindow(QWidget):
                 self._add_device_row(device)
 
         self._restore_details(devices)
-        self._fit_height()
+        self._schedule_fit()
 
     def _active_panel(self) -> QWidget:
         return self._mini_panel if self._compact else self._panel
@@ -544,12 +544,9 @@ class OverlayWindow(QWidget):
         panel_layout = panel.layout()
         if panel_layout is not None:
             panel_layout.activate()
-            panel_layout.setGeometry(panel.rect())
         screen = self.screen()
         available = screen.availableGeometry().height() if screen else 1080
         limit = max(320, available - 80)
-        # sizeHint under-reports the mini panel, so take the larger of the hint
-        # and the layout's own minimum plus its margins.
         hint = panel.sizeHint().height()
         if panel_layout is not None:
             margins = panel_layout.contentsMargins()
@@ -563,11 +560,17 @@ class OverlayWindow(QWidget):
         if target != self.height():
             self.resize(self.width(), target)
 
+    def _schedule_fit(self) -> None:
+        # Row widgets report their real size only after the event loop has laid
+        # them out, so fit once now and once on the next tick.
+        self._fit_height()
+        QTimer.singleShot(0, self._fit_height)
+
     def _apply_mode(self) -> None:
         self._mini_panel.setVisible(self._compact)
         self._panel.setVisible(not self._compact)
         self.setFixedWidth(MINI_WIDTH if self._compact else FULL_WIDTH)
-        self._fit_height()
+        self._schedule_fit()
 
     def toggle_mode(self) -> None:
         self._compact = not self._compact
@@ -656,7 +659,7 @@ class OverlayWindow(QWidget):
                 row.set_selected(False)
         self._detail_key = None
         self._selected_device.setVisible(False)
-        self._fit_height()
+        self._schedule_fit()
 
     def _show_device_details(self, device: DeviceRecord) -> None:
         key = _device_key(device)
@@ -672,7 +675,7 @@ class OverlayWindow(QWidget):
             row.set_selected(True)
         self._selected_device.setText(self._detail_text(device))
         self._selected_device.setVisible(True)
-        self._fit_height()
+        self._schedule_fit()
 
     @staticmethod
     def _detail_text(device: DeviceRecord) -> str:
