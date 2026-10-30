@@ -340,3 +340,135 @@ def _listen_mouse_report(
         finally:
             device.close()
     return None
+
+
+KEYBOARD_VENDOR_ID = 0x0C45
+KEYBOARD_PRODUCT_ID = 0xFEFE
+
+_KEYBOARD_STATE: dict[str, object] = {
+    "percent": None,
+    "raw": None,
+    "clock": "",
+    "reports": 0,
+}
+_KEYBOARD_LOCK = threading.Lock()
+_KEYBOARD_LISTENER = None
+_KEYBOARD_LISTENER_LOCK = threading.Lock()
+
+
+def parse_keyboard_battery(raw: list[int]) -> int | None:
+    """Decode the battery byte of the vendor broadcast.
+
+    ``raw[1]`` is BCD: 0x55 -> 55. Across 378 sampled reports every other byte
+    moved while this one stayed fixed, and its BCD value matched the level the
+    user read from the keyboard, so it is the strongest candidate field.
+    """
+    if len(raw) < 2:
+        return None
+    value = raw[1]
+    high, low = value >> 4, value & 0x0F
+    if high > 9 or low > 9:
+        return None
+    percent = high * 10 + low
+    if not 0 <= percent <= 100:
+        return None
+    return percent
+
+
+class KeyboardBroadcastListener:
+    """Listen to the 0xFF60 vendor stream that carries the battery byte.
+
+    Like the mouse this device answers no request, so the value can only be
+    observed passively. The listener never sends a report.
+    """
+
+    def __init__(self, vendor_id: int, product_id: int) -> None:
+        self.vendor_id = vendor_id
+        self.product_id = product_id
+        self._stop = threading.Event()
+        self._thread = None
+        self.connected = False
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self._thread = threading.Thread(
+            target=self._run, name="keyboard-battery-listener", daemon=True
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        thread = self._thread
+        if thread is not None:
+            thread.join(timeout=3)
+        self._thread = None
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            interface = self._find_interface()
+            if interface is None:
+                self.connected = False
+                self._stop.wait(5)
+                continue
+            self.connected = True
+            try:
+                read_input_reports(interface, self._handle, self._stop)
+            except Exception:
+                pass
+            finally:
+                self.connected = False
+            if not self._stop.is_set():
+                self._stop.wait(3)
+
+    def _find_interface(self):
+        for interface in enumerate_hid_interfaces():
+            if interface.vid_pid != f"{self.vendor_id:04X}:{self.product_id:04X}":
+                continue
+            if interface.usage_page != 0xFF60 or interface.usage != 0x61:
+                continue
+            if interface.input_report_length < 2:
+                continue
+            return interface
+        return None
+
+    def _handle(self, data: list[int]) -> None:
+        raw = [int(value) for value in data]
+        percent = parse_keyboard_battery(raw)
+        if percent is None:
+            return
+        with _KEYBOARD_LOCK:
+            _KEYBOARD_STATE["percent"] = percent
+            _KEYBOARD_STATE["raw"] = tuple(raw)
+            _KEYBOARD_STATE["clock"] = datetime.now().strftime("%H:%M")
+            _KEYBOARD_STATE["reports"] = int(_KEYBOARD_STATE["reports"]) + 1
+
+
+def start_keyboard_listener(
+    vendor_id: int = KEYBOARD_VENDOR_ID,
+    product_id: int = KEYBOARD_PRODUCT_ID,
+) -> KeyboardBroadcastListener:
+    global _KEYBOARD_LISTENER
+    with _KEYBOARD_LISTENER_LOCK:
+        if _KEYBOARD_LISTENER is None:
+            _KEYBOARD_LISTENER = KeyboardBroadcastListener(vendor_id, product_id)
+            _KEYBOARD_LISTENER.start()
+        return _KEYBOARD_LISTENER
+
+
+def stop_keyboard_listener() -> None:
+    global _KEYBOARD_LISTENER
+    with _KEYBOARD_LISTENER_LOCK:
+        if _KEYBOARD_LISTENER is not None:
+            _KEYBOARD_LISTENER.stop()
+            _KEYBOARD_LISTENER = None
+
+
+def read_keyboard_battery() -> tuple[int, str] | None:
+    """Return (percent, captured clock) from the vendor broadcast, if seen."""
+    with _KEYBOARD_LOCK:
+        percent = _KEYBOARD_STATE["percent"]
+        clock = str(_KEYBOARD_STATE["clock"])
+    if percent is None:
+        return None
+    return int(percent), clock

@@ -21,9 +21,14 @@ from PySide6.QtWidgets import (
 
 from .autostart import install_autostart, remove_autostart
 from .battery_protocols import (
+    KEYBOARD_PRODUCT_ID,
+    KEYBOARD_VENDOR_ID,
+    read_keyboard_battery,
     read_mouse_battery,
     read_vendor_battery_candidates,
+    start_keyboard_listener,
     start_mouse_listener,
+    stop_keyboard_listener,
     stop_mouse_listener,
 )
 from .device_discovery import DeviceDiscoveryError, DeviceRecord, discover_devices
@@ -92,8 +97,7 @@ def _merged_name(
 
 def _merge_by_device(
     devices: list[DeviceRecord],
-    keyboard: tuple[str, int] | None,
-    mouse: tuple[str, int, str] | None,
+    readings_by_device: dict[str, list[tuple[str, int, str]]],
 ) -> list[DeviceRecord]:
     """Collapse every HID collection of one physical device into a single row."""
     groups: dict[str, list[DeviceRecord]] = {}
@@ -105,16 +109,11 @@ def _merge_by_device(
     for members in groups.values():
         primary = _primary_member(members)
         categories = {member.category for member in members}
-        readings: list[tuple[str, int, str]] = []
-        if keyboard is not None and primary.vid_pid == keyboard[0] and "键盘" in categories:
-            readings.append(("键盘", keyboard[1], "厂商 HID 报告"))
-        if mouse is not None and primary.vid_pid == mouse[0]:
-            readings.append(("鼠标", mouse[1], mouse[2]))
-        primary_category = primary.category
+        readings = list(readings_by_device.get(primary.vid_pid or "", ()))
         merged.append(
             replace(
                 primary,
-                category=primary_category,
+                category=primary.category,
                 name=_merged_name(
                     primary, categories, {reading[0] for reading in readings}
                 ),
@@ -134,25 +133,34 @@ class DeviceDiscoveryThread(QThread):
     def run(self) -> None:
         try:
             devices = discover_devices()
-            keyboard: tuple[str, int] | None = None
+            readings: dict[str, list[tuple[str, int, str]]] = {}
+
             for reading in read_vendor_battery_candidates():
-                keyboard = (
-                    f"{reading.vendor_id:04X}:{reading.product_id:04X}",
-                    reading.values[0],
+                key = f"{reading.vendor_id:04X}:{reading.product_id:04X}"
+                readings.setdefault(key, []).append(
+                    ("键盘", reading.values[0], "厂商 Feature Report（候选）")
                 )
                 break
+
+            keyboard_battery = read_keyboard_battery()
+            if keyboard_battery is not None:
+                percent, clock = keyboard_battery
+                key = f"{KEYBOARD_VENDOR_ID:04X}:{KEYBOARD_PRODUCT_ID:04X}"
+                readings.setdefault(key, []).append(
+                    ("键盘", percent, f"厂商广播 · {clock}（候选）")
+                )
+
             mouse_status = read_mouse_battery()
-            mouse: tuple[str, int, str] | None = None
             if mouse_status is not None:
                 source = "厂商 HID 报告"
                 if mouse_status.cached:
                     source = f"厂商 HID 报告 · 缓存 {mouse_status.captured_clock}"
-                mouse = (
-                    f"{mouse_status.vendor_id:04X}:{mouse_status.product_id:04X}",
-                    mouse_status.battery_percent,
-                    source,
+                key = f"{mouse_status.vendor_id:04X}:{mouse_status.product_id:04X}"
+                readings.setdefault(key, []).append(
+                    ("鼠标", mouse_status.battery_percent, source)
                 )
-            self.devices_found.emit(_merge_by_device(devices, keyboard, mouse))
+
+            self.devices_found.emit(_merge_by_device(devices, readings))
         except DeviceDiscoveryError as exc:
             self.discovery_failed.emit(str(exc))
 
@@ -776,6 +784,7 @@ def main() -> int:
 
     app = QApplication(sys.argv)
     start_mouse_listener()
+    start_keyboard_listener()
     window = OverlayWindow()
     available_geometry = app.primaryScreen().availableGeometry()
     position = available_geometry.topLeft() + QPoint(40, 40)
@@ -795,6 +804,7 @@ def main() -> int:
 
     exit_code = app.exec()
     stop_mouse_listener()
+    stop_keyboard_listener()
     return exit_code
 
 

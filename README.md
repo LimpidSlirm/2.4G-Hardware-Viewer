@@ -95,6 +95,8 @@ requirements.txt
 ### `app/battery_protocols.py` — 电量协议
 
 - `read_vendor_battery_candidates()`：读取键盘接收器 `3554:FA09` 的 Feature Report 6
+- `parse_keyboard_battery()`：把 `0C45:FEFE` 广播报文的 `[1]` 按 BCD 解码为电量
+- `read_keyboard_battery()`：读取常驻监听缓存中的键盘电量
 - `parse_rapoo_status()`：解析鼠标状态报告，并用 DPI 双轴做偏移自校验
 - `read_mouse_battery()`：被动监听鼠标 Input Report 7，静默时返回带 `cached` 标记的最后读数
 - `_listen_mouse_report()`：单次监听，不发送任何报告
@@ -137,7 +139,10 @@ list[DeviceRecord] ──Qt 信号──► OverlayWindow
 | 设备 | VID:PID | 读取方式 | 字段 |
 | --- | --- | --- | --- |
 | 无线键盘接收器 | `3554:FA09` | Feature Report 6（只读） | 字节 `[3..5]` 为候选电量，当前三个值均一致 |
+| 无线键盘 | `0C45:FEFE` | 监听 `0xFF60` 广播（被动） | `[1]` 为 BCD 电量，`0x55` → 55% |
 | 无线鼠标 | `24AE:1411` | Input Report 7（被动接收） | `[7]` 状态标志、`[8]` 电量百分比 |
+
+`0C45:FEFE` 这块键盘不响应任何查询命令，只在厂商接口 `0xFF60` 上主动广播 33 字节报文（约每秒 3 条）。实测 378 条样本中其余字节都在变化，只有 `[1]` 恒为 `0x55`，且按 BCD 解码为 55，与键盘自身显示的电量一致，因此作为候选字段读取。
 
 鼠标报告的偏移通过 DPI 自校验确认：
 
