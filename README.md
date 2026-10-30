@@ -196,3 +196,9 @@ zero bytes for Report 9. These values are not treated as a battery reading:
 zero may be protocol data or an unsupported report, not 0% battery. The
 existing `3554:FA09` battery reader correctly returned no result in this
 configuration.
+
+The report descriptor inspection also found that both reports expose only the
+vendor Usage `0xFF00/0x0003` as a 32-byte raw field. No standard HID Battery
+Strength usage was present. Because the current evidence does not identify a
+battery byte, the application does not send an output report or vendor command
+to this mouse and continues to show its battery as undisclosed.
