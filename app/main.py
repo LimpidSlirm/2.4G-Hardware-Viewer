@@ -28,6 +28,22 @@ class DeviceDiscoveryThread(QThread):
             self.discovery_failed.emit(str(exc))
 
 
+class DeviceLabel(QLabel):
+    clicked = Signal(DeviceRecord)
+
+    def __init__(self, device: DeviceRecord, text: str, style: str) -> None:
+        super().__init__(text)
+        self._device = device
+        self.setStyleSheet(style)
+        self.setWordWrap(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit(self._device)
+        super().mousePressEvent(event)
+
+
 class OverlayWindow(QWidget):
     def __init__(self) -> None:
         super().__init__()
@@ -40,6 +56,7 @@ class OverlayWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setMinimumSize(460, 300)
         self._build_ui()
+        self.adjustSize()
         self._discovery_thread: Optional[DeviceDiscoveryThread] = None
         self._refresh_timer = QTimer(self)
         self._refresh_timer.timeout.connect(self.refresh_devices)
@@ -68,6 +85,12 @@ class OverlayWindow(QWidget):
         self._subtitle.setStyleSheet("color: #aab6c8;")
         self._device_layout = QVBoxLayout()
         self._device_layout.setSpacing(4)
+        self._selected_device = QLabel("点击设备查看详情")
+        self._selected_device.setWordWrap(True)
+        self._selected_device.setStyleSheet(
+            "color: #b7c5d8; background: rgba(36, 45, 59, 180);"
+            " border-radius: 5px; padding: 6px;"
+        )
         self._refresh_info = QLabel("自动刷新间隔：5 秒")
         self._refresh_info.setStyleSheet("color: #8290a5; font-size: 11px;")
         self._refresh_button = QPushButton("立即刷新")
@@ -97,6 +120,7 @@ class OverlayWindow(QWidget):
         layout.addWidget(self._subtitle)
         layout.addLayout(self._device_layout)
         layout.addStretch(1)
+        layout.addWidget(self._selected_device)
         controls = QHBoxLayout()
         controls.addWidget(self._refresh_info)
         controls.addStretch(1)
@@ -176,11 +200,21 @@ class OverlayWindow(QWidget):
             )
             for device in category_devices:
                 color = "#a7e3b1" if device.status.upper() == "OK" else "#ffb4ab"
-                label = self._add_device_label(
+                label = DeviceLabel(
+                    device,
                     f"  {device.name}  ·  {device.status}",
                     f"color: {color}; font-size: 11px;",
                 )
                 label.setToolTip(f"Windows 实例 ID：\n{device.instance_id}")
+                label.clicked.connect(self._show_device_details)
+                self._device_layout.addWidget(label)
+
+    def _show_device_details(self, device: DeviceRecord) -> None:
+        self._selected_device.setText(
+            f"选中：{device.name}\n"
+            f"类别：{device.category}  |  状态：{device.status}\n"
+            f"实例 ID：{device.instance_id}"
+        )
 
     def _add_device_label(self, text: str, style: str) -> QLabel:
         label = QLabel(text)
@@ -223,7 +257,9 @@ class OverlayWindow(QWidget):
 def main() -> int:
     app = QApplication(sys.argv)
     window = OverlayWindow()
-    window.move(80, 80)
+    available_geometry = app.primaryScreen().availableGeometry()
+    position = available_geometry.topLeft() + QPoint(40, 40)
+    window.move(position)
     window.show()
 
     if "--smoke-test" in sys.argv:
