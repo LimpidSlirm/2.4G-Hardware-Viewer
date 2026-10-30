@@ -107,3 +107,7 @@ The device panel groups results by category, removes repeated display entries
 that represent the same category, name, and status, shows normal-status counts,
 and refreshes automatically every five seconds. The underlying Windows
 instance IDs are retained for future detail views.
+
+The panel also provides an immediate refresh button. Hovering over a device
+shows its Windows instance ID without adding the technical identifier to the
+main display.

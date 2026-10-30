@@ -5,7 +5,14 @@ from typing import Optional
 
 from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtGui import QFont, QMouseEvent
-from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QLabel,
+    QPushButton,
+    QHBoxLayout,
+    QVBoxLayout,
+    QWidget,
+)
 
 from .device_discovery import DeviceDiscoveryError, DeviceRecord, discover_devices
 
@@ -51,6 +58,23 @@ class OverlayWindow(QWidget):
         self._device_layout.setSpacing(4)
         self._refresh_info = QLabel("自动刷新间隔：5 秒")
         self._refresh_info.setStyleSheet("color: #8290a5; font-size: 11px;")
+        self._refresh_button = QPushButton("立即刷新")
+        self._refresh_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._refresh_button.setStyleSheet(
+            """
+            QPushButton {
+                color: #d7e0ed;
+                background-color: rgba(68, 89, 116, 180);
+                border: 1px solid rgba(160, 180, 210, 130);
+                border-radius: 5px;
+                padding: 4px 10px;
+            }
+            QPushButton:hover {
+                background-color: rgba(88, 116, 150, 210);
+            }
+            """
+        )
+        self._refresh_button.clicked.connect(self.refresh_devices)
         hint = QLabel("拖动窗口移动  |  Esc 关闭")
         hint.setStyleSheet("color: #8290a5; font-size: 11px;")
 
@@ -61,7 +85,11 @@ class OverlayWindow(QWidget):
         layout.addWidget(self._subtitle)
         layout.addLayout(self._device_layout)
         layout.addStretch(1)
-        layout.addWidget(self._refresh_info)
+        controls = QHBoxLayout()
+        controls.addWidget(self._refresh_info)
+        controls.addStretch(1)
+        controls.addWidget(self._refresh_button)
+        layout.addLayout(controls)
         layout.addWidget(hint)
 
         outer_layout = QVBoxLayout(self)
@@ -121,16 +149,18 @@ class OverlayWindow(QWidget):
             )
             for device in category_devices:
                 color = "#a7e3b1" if device.status.upper() == "OK" else "#ffb4ab"
-                self._add_device_label(
+                label = self._add_device_label(
                     f"  {device.name}  ·  {device.status}",
                     f"color: {color}; font-size: 11px;",
                 )
+                label.setToolTip(f"Windows 实例 ID：\n{device.instance_id}")
 
-    def _add_device_label(self, text: str, style: str) -> None:
+    def _add_device_label(self, text: str, style: str) -> QLabel:
         label = QLabel(text)
         label.setStyleSheet(style)
         label.setWordWrap(True)
         self._device_layout.addWidget(label)
+        return label
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
