@@ -29,3 +29,30 @@ The information available to the application depends on the device and its
 Windows driver. Connection state and device identity are expected to be
 available; battery, signal quality, latency, and vendor-specific details may
 not be exposed.
+
+## Technical direction
+
+The project will use:
+
+- Python 3.13
+- PySide6 for the Windows desktop user interface
+- pywin32 for Windows device and system interfaces
+- pyserial only if a future supported device exposes a serial interface
+
+The application targets Windows first. The .NET/WPF option was considered, but
+the current development environment has a usable Python GUI and Windows API
+stack already installed, so Python is the lower-friction choice for the first
+working version.
+
+## Step 2 verification
+
+The development environment currently provides:
+
+- Python 3.13.9 through the active `python` command
+- PySide6 6.9.2
+- pywin32
+- pyserial 3.5
+- Tkinter as a fallback standard-library GUI toolkit
+
+These components are sufficient to create and run the initial desktop
+application without installing additional packages.
