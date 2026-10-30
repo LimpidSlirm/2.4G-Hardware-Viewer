@@ -155,3 +155,14 @@ and how many remain undisclosed by Windows, but this summary is hidden from the
 overlay to keep the panel compact. Each row shows the current battery source:
 `Win32_Battery` for the system battery, `Windows` for a device-specific value,
 or `待探测` when a vendor/HID protocol has not yet been identified.
+
+## HID battery investigation
+
+The project now includes a read-only HID inventory using the Windows HID and
+SetupAPI DLLs. It records VID:PID, Usage Page, Usage, and input/output/Feature
+Report lengths without sending reports or reading input events.
+
+On the development computer, the inventory found 22 HID interfaces. The
+external keyboard/mouse interfaces use VID:PID `3554:FA09` and `24AE:1411`;
+17 matching interfaces were found, including 3 with Feature Reports. These
+interfaces are the next safe source for device-specific battery investigation.
