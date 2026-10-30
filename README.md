@@ -216,3 +216,14 @@ vendor Usage `0xFF00/0x0003` as a 32-byte raw field. No standard HID Battery
 Strength usage was present. Because the current evidence does not identify a
 battery byte, the application does not send an output report or vendor command
 to this mouse and continues to show its battery as undisclosed.
+
+## Headset connection test
+
+After connecting the HUAWEI FreeBuds SE 2, Windows enumerated the Bluetooth
+device and its A2DP, AVRCP, and Hands-Free services. It did not enumerate the
+reference project's `3654:6901` receiver, and no new HID battery interface
+appeared. `Win32_Battery` and the WMI `BatteryStatus` query continued to
+report only the laptop ACPI battery at 100%; the Bluetooth headset did not
+provide a battery percentage through these interfaces. Its Bluetooth
+`DEVPKEY_Device_PowerData` value is power-management metadata, not a battery
+percentage, so it is not used as one.
