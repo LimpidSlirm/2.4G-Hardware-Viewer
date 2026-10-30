@@ -58,7 +58,7 @@ $devices = Get-PnpDevice -PresentOnly |
 
 def _category_for_class(device_class: str) -> str:
     return {
-        "AudioEndpoint": "耳机/音频",
+        "AudioEndpoint": "音频设备",
         "Keyboard": "键盘",
         "Mouse": "鼠标",
     }.get(device_class, device_class)

@@ -148,11 +148,12 @@ VID:PID. This is a read-only identification step for selecting a safe
 device-specific battery protocol; it does not send HID commands.
 
 The device list no longer uses a scroll area; the overlay sizes itself to the
-number of rows and caps at 720 px. Each peripheral with a known battery shows a
-green progress bar with its percentage, and rows without a value show
-`电量：未知（Windows 未公开）`. Clicking a row expands a detail panel below the
-list; clicking the same row again collapses it, and the panel stays hidden
-until a row is clicked. The system battery is no longer queried or displayed.
+number of rows and caps at 720 px. Rows are grouped as `音频设备`, `键盘`, and
+`鼠标`, and each row shows a status dot, the device name, its VID:PID and
+transport, and either a green battery bar with the percentage or a
+`电量未公开` note. Clicking a row expands a detail panel below the list;
+clicking the same row again collapses it, and the panel stays hidden until a
+row is clicked. The system battery is no longer queried or displayed.
 
 The application still calculates how many peripheral battery values were read
 and how many remain undisclosed by Windows, but this summary is hidden from the
