@@ -294,6 +294,9 @@ class OverlayWindow(QWidget):
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
+            # Tool windows get WS_EX_TOOLWINDOW, which keeps this overlay out of
+            # the taskbar button area and out of Alt+Tab.
+            | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setWindowOpacity(self._opacity)
