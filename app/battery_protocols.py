@@ -44,42 +44,93 @@ def read_vendor_battery_candidates() -> list[BatteryReading]:
     return readings
 
 
-def read_mouse_battery_candidates(
+RAPOO_REPORT_ID = 7
+RAPOO_MIN_DPI = 100
+RAPOO_MAX_DPI = 32000
+
+
+@dataclass(frozen=True)
+class RapooStatus:
+    vendor_id: int
+    product_id: int
+    device_id: int
+    dpi_index: int
+    dpi_x: int
+    dpi_y: int
+    active_state: int
+    battery_percent: int
+
+
+def parse_rapoo_status(raw: list[int]) -> RapooStatus | None:
+    if len(raw) < 9 or raw[0] != RAPOO_REPORT_ID:
+        return None
+    dpi_x = raw[3] | (raw[4] << 8)
+    dpi_y = raw[5] | (raw[6] << 8)
+    # The DPI pair is the layout self-check: a wrong offset produces implausible
+    # values, so the battery byte is only trusted when both axes decode sanely.
+    if not RAPOO_MIN_DPI <= dpi_x <= RAPOO_MAX_DPI:
+        return None
+    if not RAPOO_MIN_DPI <= dpi_y <= RAPOO_MAX_DPI:
+        return None
+    if not 0 <= raw[8] <= 100:
+        return None
+    return RapooStatus(
+        vendor_id=0,
+        product_id=0,
+        device_id=raw[1],
+        dpi_index=raw[2],
+        dpi_x=dpi_x,
+        dpi_y=dpi_y,
+        active_state=raw[7],
+        battery_percent=raw[8],
+    )
+
+
+def read_mouse_battery(
+    vendor_id: int = 0x24AE,
+    product_id: int = 0x1411,
     timeout_seconds: float = 8.0,
-) -> list[BatteryReading]:
-    readings: list[BatteryReading] = []
-    devices = hid.HidDeviceFilter(vendor_id=0x24AE, product_id=0x1411).get_devices()
-    for device in devices:
+) -> RapooStatus | None:
+    """Listen for the passive Report 7 broadcast. Never sends a report."""
+    for device in hid.HidDeviceFilter(
+        vendor_id=vendor_id, product_id=product_id
+    ).get_devices():
         try:
             device.open()
             if not any(
-                report.report_id == 7 for report in device.find_input_reports()
+                report.report_id == RAPOO_REPORT_ID
+                for report in device.find_input_reports()
             ):
                 continue
 
             received = threading.Event()
-            battery_values: list[int] = []
+            statuses: list[RapooStatus] = []
 
             def handle_report(data: list[int]) -> None:
-                if len(data) > 8 and data[0] == 7 and 0 <= data[8] <= 100:
-                    battery_values.append(int(data[8]))
-                    received.set()
+                status = parse_rapoo_status([int(value) for value in data])
+                if status is None:
+                    return
+                statuses.append(
+                    RapooStatus(
+                        vendor_id=device.vendor_id,
+                        product_id=device.product_id,
+                        device_id=status.device_id,
+                        dpi_index=status.dpi_index,
+                        dpi_x=status.dpi_x,
+                        dpi_y=status.dpi_y,
+                        active_state=status.active_state,
+                        battery_percent=status.battery_percent,
+                    )
+                )
+                received.set()
 
             device.set_raw_data_handler(handle_report)
             received.wait(timeout_seconds)
             device.set_raw_data_handler(None)
-            if battery_values:
-                readings.append(
-                    BatteryReading(
-                        vendor_id=device.vendor_id,
-                        product_id=device.product_id,
-                        report_id=7,
-                        values=(battery_values[-1],),
-                        source="厂商输入报告（24AE:1411 / Report 7）",
-                    )
-                )
+            if statuses:
+                return statuses[-1]
         except (OSError, hid.HIDError):
             continue
         finally:
             device.close()
-    return readings
+    return None

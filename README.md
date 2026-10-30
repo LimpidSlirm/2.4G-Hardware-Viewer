@@ -221,21 +221,37 @@ to this mouse and continues to show its battery as undisclosed.
 
 The current mouse (`24AE:1411`, Rapoo Gaming Device) uses a different protocol
 from the reference screenshot's `373B:1216` command protocol. It passively
-sends Input Report 7 on its HID mouse interface. A captured report was:
+sends Input Report 7 on its `UsagePage 0xFF00 / Usage 0x0002` interface. A
+captured report was:
 
 ```text
 [7, 16, 3, 64, 6, 64, 6, 1, 99, 0, 2, 2, 0]
 ```
 
-The report repeatedly contained `99` at byte `[8]`, but this is not yet
-accepted as the battery percentage. The publicly available Rapoo protocol
-documentation that maps this byte applies to `24AE:1413` (Rapoo VT7) and
-describes a 19-byte report, while this device is `24AE:1411` and emitted a
-13-byte report. The application still listens without sending an Output or
-Feature Report, but keeps this value as an unverified candidate rather than
-displaying it as the mouse battery. The mouse may be asleep and emit no
-report until it is moved; no report is treated as an unknown value, not as
-0%.
+Field layout used by the reader:
+
+| Offset | Meaning |
+| --- | --- |
+| `[0]` | Report ID `0x07` |
+| `[1]` | Device/receiver identifier |
+| `[2]` | DPI profile index |
+| `[3..4]` | X DPI, 16-bit little-endian |
+| `[5..6]` | Y DPI, 16-bit little-endian |
+| `[7]` | Active state flag |
+| `[8]` | Battery percentage, `0x00`-`0x64` |
+
+The offsets are validated at runtime through the DPI pair, which decoded to a
+plausible `1600 x 1600`; a report whose DPI pair is implausible is rejected
+instead of being read as battery. Observed battery values were `99` and `100`
+across separate samples, so the byte is live rather than a fixed placeholder.
+The device is `24AE:1411` with a 13-byte report while the published Rapoo VT7
+documentation describes `24AE:1413` with a 19-byte report, and the device
+identifier byte is `0x10` instead of `0x20`; the shared offsets still decode
+consistently, including the DPI self-check.
+
+The application only listens for this passive report and never sends an Output
+or Feature Report. The mouse may be asleep and emit no report until it is
+moved; no report is treated as an unknown value, not as 0%.
 
 ## Headset connection test
 

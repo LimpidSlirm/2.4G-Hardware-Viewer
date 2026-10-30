@@ -17,10 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .battery_protocols import (
-    read_mouse_battery_candidates,
-    read_vendor_battery_candidates,
-)
+from .battery_protocols import read_mouse_battery, read_vendor_battery_candidates
 from .device_discovery import DeviceDiscoveryError, DeviceRecord, discover_devices
 
 
@@ -42,15 +39,17 @@ class DeviceDiscoveryThread(QThread):
                         battery_percent=reading.values[0],
                     )
                 )
-            for reading in read_mouse_battery_candidates():
+            mouse_status = read_mouse_battery()
+            if mouse_status is not None:
                 devices.append(
                     DeviceRecord(
-                        category="鼠标电量候选",
-                        name=f"{reading.vendor_id:04X}:{reading.product_id:04X} "
-                        f"Report {reading.report_id}（候选字段 {reading.values[0]}）",
-                        status="待验证",
+                        category="鼠标电量",
+                        name=f"{mouse_status.vendor_id:04X}:"
+                        f"{mouse_status.product_id:04X} 无线鼠标"
+                        f"（{mouse_status.dpi_x} DPI）",
+                        status="已读取",
                         instance_id="mouse-input-report",
-                        battery_percent=None,
+                        battery_percent=mouse_status.battery_percent,
                     )
                 )
             self.devices_found.emit(devices)
@@ -268,8 +267,8 @@ class OverlayWindow(QWidget):
             "耳机/音频",
             "键盘",
             "鼠标",
+            "鼠标电量",
             "键盘电量候选",
-            "鼠标电量候选",
         )
         for category in category_order:
             category_devices = [
@@ -285,7 +284,7 @@ class OverlayWindow(QWidget):
                 color = "#a7e3b1" if device.status.upper() == "OK" else "#ffb4ab"
                 battery = (
                     f"  电量：{device.battery_percent}%  ·  来源："
-                    f"{'厂商报告' if '电量候选' in device.category else 'Windows'}"
+                    f"{'厂商报告' if '电量' in device.category else 'Windows'}"
                     if device.battery_percent is not None
                     else "  电量：未知（Windows 未公开）  ·  来源：待探测"
                 )
