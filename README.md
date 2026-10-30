@@ -180,6 +180,20 @@ receiver exposes the keyboard and mouse together, the first value is currently
 shown as `键盘电量候选 100%`; it remains explicitly marked as a candidate until
 a controlled battery-change test confirms the byte mapping.
 
+The connection comparison now identifies this receiver as the keyboard path:
+when the keyboard was disconnected, `3554:FA09` disappeared and Report 6
+returned no data; when only the keyboard was connected, it reappeared and
+returned the same raw report three times:
+
+```text
+[6, 0, 2, 100, 100, 100, 53, 21]
+```
+
+This confirms the association with the keyboard receiver and supports the
+current full-charge observation. The exact meaning of each of the three
+candidate bytes is still not independently confirmed because no discharge
+measurement has been performed.
+
 ## Disconnect test
 
 After the keyboard and headset were disconnected, `3554:FA09` disappeared
