@@ -41,6 +41,18 @@ def _category_for_class(device_class: str) -> str:
     }.get(device_class, device_class)
 
 
+def _is_user_target_device(device_class: str, name: str, instance_id: str) -> bool:
+    if device_class == "Keyboard":
+        return not (
+            instance_id.upper().startswith("ACPI\\")
+            or "PS/2" in name
+            or "标准键盘" in name
+        )
+    if device_class == "AudioEndpoint":
+        return "麦克风阵列" not in name
+    return True
+
+
 def _records_from_json(payload: Any) -> list[DeviceRecord]:
     if not isinstance(payload, dict) or not isinstance(payload.get("Devices"), list):
         raise DeviceDiscoveryError("Windows returned an unexpected device list.")
@@ -53,7 +65,11 @@ def _records_from_json(payload: Any) -> list[DeviceRecord]:
         name = str(item.get("FriendlyName") or "未命名设备")
         status = str(item.get("Status") or "Unknown")
         instance_id = str(item.get("InstanceId") or "")
-        if device_class and instance_id:
+        if (
+            device_class
+            and instance_id
+            and _is_user_target_device(device_class, name, instance_id)
+        ):
             records.append(
                 DeviceRecord(
                     category=_category_for_class(device_class),

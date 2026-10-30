@@ -138,3 +138,7 @@ uses device-specific HID protocols for VID:PID `373B:1216` and `3654:6901`.
 The development computer currently exposes `3554:FA09` and `24AE:1411` for
 its HID keyboard/mouse devices, and the headset appears as a Bluetooth device,
 so those reference commands are not applied automatically.
+
+The discovery view excludes the laptop's ACPI/PS/2 keyboard and the built-in
+microphone array. Automatic Windows device reading runs every five minutes;
+the `立即刷新` button and `F5` still trigger an on-demand read.

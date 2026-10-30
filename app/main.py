@@ -68,7 +68,7 @@ class OverlayWindow(QWidget):
         self._discovery_thread: Optional[DeviceDiscoveryThread] = None
         self._refresh_timer = QTimer(self)
         self._refresh_timer.timeout.connect(self.refresh_devices)
-        self._refresh_timer.start(5000)
+        self._refresh_timer.start(300000)
         self.refresh_devices()
 
     def _build_ui(self) -> None:
@@ -103,7 +103,7 @@ class OverlayWindow(QWidget):
             "color: #b7c5d8; background: rgba(36, 45, 59, 180);"
             " border-radius: 5px; padding: 6px;"
         )
-        self._refresh_info = QLabel("自动刷新间隔：5 秒")
+        self._refresh_info = QLabel("自动刷新间隔：5 分钟")
         self._refresh_info.setStyleSheet("color: #8290a5; font-size: 11px;")
         self._refresh_button = QPushButton("立即刷新")
         self._refresh_button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -162,14 +162,14 @@ class OverlayWindow(QWidget):
             f"已发现 {len(devices)} 个设备  |  正常 {online_count}"
         )
         self._refresh_info.setText(
-            f"刷新：{datetime.now().strftime('%H:%M:%S')}  |  透明度：{round(self._opacity * 100)}%"
+            f"刷新：{datetime.now().strftime('%H:%M:%S')}  |  自动刷新：5 分钟  |  透明度：{round(self._opacity * 100)}%"
         )
         self._replace_device_rows(devices)
 
     def _display_discovery_error(self, message: str) -> None:
         self._subtitle.setText("设备读取失败")
         self._refresh_info.setText(
-            f"失败：{datetime.now().strftime('%H:%M:%S')}  |  透明度：{round(self._opacity * 100)}%"
+            f"失败：{datetime.now().strftime('%H:%M:%S')}  |  自动刷新：5 分钟  |  透明度：{round(self._opacity * 100)}%"
         )
         self._replace_device_rows([f"错误：{message}"])
 
@@ -301,7 +301,7 @@ class OverlayWindow(QWidget):
             self._opacity = min(1.0, max(0.35, self._opacity + change))
             self.setWindowOpacity(self._opacity)
             self._refresh_info.setText(
-                f"刷新间隔：5 秒  |  透明度：{round(self._opacity * 100)}%"
+                f"自动刷新：5 分钟  |  透明度：{round(self._opacity * 100)}%"
             )
             return
         super().keyPressEvent(event)
