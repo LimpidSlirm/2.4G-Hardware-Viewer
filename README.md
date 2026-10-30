@@ -118,3 +118,7 @@ remains responsive while an immediate or automatic refresh queries Windows.
 Clicking a device row shows its category, status, and Windows instance ID in
 the detail area below the device list. Long instance IDs wrap inside the
 overlay instead of expanding the window horizontally.
+
+The overlay supports `F5` for an immediate refresh. `Ctrl+Up` and `Ctrl+Down`
+increase or decrease opacity between 35% and 100%; `Esc` closes the window.
+The panel displays the most recent refresh time and current opacity.

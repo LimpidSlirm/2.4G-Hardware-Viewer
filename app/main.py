@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime
 from typing import Optional
 
 from PySide6.QtCore import QPoint, QThread, Qt, QTimer, Signal
@@ -48,12 +49,14 @@ class OverlayWindow(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self._drag_offset: Optional[QPoint] = None
+        self._opacity = 0.92
         self.setWindowTitle("2.4G Hardware Viewer")
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setWindowOpacity(self._opacity)
         self.setMinimumWidth(460)
         self.setMaximumWidth(520)
         self._build_ui()
@@ -150,10 +153,16 @@ class OverlayWindow(QWidget):
         self._subtitle.setText(
             f"已发现 {len(devices)} 个设备  |  正常 {online_count}"
         )
+        self._refresh_info.setText(
+            f"刷新：{datetime.now().strftime('%H:%M:%S')}  |  透明度：{round(self._opacity * 100)}%"
+        )
         self._replace_device_rows(devices)
 
     def _display_discovery_error(self, message: str) -> None:
         self._subtitle.setText("设备读取失败")
+        self._refresh_info.setText(
+            f"失败：{datetime.now().strftime('%H:%M:%S')}  |  透明度：{round(self._opacity * 100)}%"
+        )
         self._replace_device_rows([f"错误：{message}"])
 
     def _discovery_finished(self) -> None:
@@ -251,6 +260,17 @@ class OverlayWindow(QWidget):
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key.Key_Escape:
             self.close()
+            return
+        if event.key() == Qt.Key.Key_F5:
+            self.refresh_devices()
+            return
+        if event.key() in (Qt.Key.Key_Up, Qt.Key.Key_Down) and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            change = 0.05 if event.key() == Qt.Key.Key_Up else -0.05
+            self._opacity = min(1.0, max(0.35, self._opacity + change))
+            self.setWindowOpacity(self._opacity)
+            self._refresh_info.setText(
+                f"刷新间隔：5 秒  |  透明度：{round(self._opacity * 100)}%"
+            )
             return
         super().keyPressEvent(event)
 
