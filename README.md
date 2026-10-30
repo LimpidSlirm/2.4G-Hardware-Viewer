@@ -56,3 +56,38 @@ The development environment currently provides:
 
 These components are sufficient to create and run the initial desktop
 application without installing additional packages.
+
+## Interface direction
+
+The application uses a transparent overlay window that:
+
+- Has no standard Windows border or title bar
+- Stays above other windows
+- Can be moved by dragging the visible panel
+- Closes with the `Esc` key during the prototype stage
+
+The transparent overlay is the initial shell. Device status cards and controls
+will be added without changing this window behavior.
+
+## Project structure
+
+```text
+app/
+  __init__.py
+  main.py
+requirements.txt
+```
+
+## Step 3 verification
+
+Run the prototype from the project directory:
+
+```powershell
+python -m app.main
+```
+
+Run the automatic startup smoke test:
+
+```powershell
+python -m app.main --smoke-test
+```
