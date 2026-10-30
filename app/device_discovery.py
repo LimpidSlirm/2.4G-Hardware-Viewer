@@ -14,6 +14,32 @@ class DeviceRecord:
     instance_id: str
     battery_percent: int | None = None
 
+    @property
+    def transport(self) -> str:
+        instance_id = self.instance_id.upper()
+        if instance_id.startswith("USB\\"):
+            return "USB"
+        if instance_id.startswith("HID\\"):
+            return "HID"
+        if instance_id.startswith("BTH"):
+            return "蓝牙"
+        if instance_id.startswith("SWD\\"):
+            return "Windows 音频端点"
+        return "系统设备"
+
+    @property
+    def vid_pid(self) -> str | None:
+        marker = self.instance_id.upper()
+        vid_start = marker.find("VID_")
+        pid_start = marker.find("PID_")
+        if vid_start < 0 or pid_start < 0:
+            return None
+        vid = marker[vid_start + 4 : vid_start + 8]
+        pid = marker[pid_start + 4 : pid_start + 8]
+        if len(vid) == 4 and len(pid) == 4:
+            return f"{vid}:{pid}"
+        return None
+
 
 class DeviceDiscoveryError(RuntimeError):
     pass

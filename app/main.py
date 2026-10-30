@@ -251,6 +251,8 @@ class OverlayWindow(QWidget):
             f"选中：{device.name}\n"
             f"类别：{device.category}  |  状态：{device.status}\n"
             f"电量：{device.battery_percent if device.battery_percent is not None else '未知（Windows 未公开）'}\n"
+            f"连接方式：{device.transport}"
+            f"{f'  |  VID:PID：{device.vid_pid}' if device.vid_pid else ''}\n"
             f"实例 ID：{device.instance_id.replace('\\\\', '\\\\\u200b')}"
         )
 

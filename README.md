@@ -142,3 +142,7 @@ so those reference commands are not applied automatically.
 The discovery view excludes the laptop's ACPI/PS/2 keyboard and the built-in
 microphone array. Automatic Windows device reading runs every five minutes;
 the `立即刷新` button and `F5` still trigger an on-demand read.
+
+The detail view now identifies the device transport and, when present, its
+VID:PID. This is a read-only identification step for selecting a safe
+device-specific battery protocol; it does not send HID commands.
