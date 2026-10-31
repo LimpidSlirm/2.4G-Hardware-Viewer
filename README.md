@@ -34,21 +34,26 @@ Windows 桌面浮层工具，实时查看已连接的 2.4G / USB / 蓝牙外设�
 | `Ctrl + ↑` / `Ctrl + ↓` | 调整不透明度（35%–100%） |
 | `Esc` | 关闭窗口 |
 
-## 开机自启
+## 开机自启与快捷方式
 
 ```powershell
-python -m app.main --install-autostart   # 写入自启项
-python -m app.main --remove-autostart    # 移除自启项
+python -m app.main --setup             # 一次搞定：写入自启项 + 创建桌面快捷方式
+python -m app.main --install-autostart # 只写入自启项
+python -m app.main --remove-autostart  # 移除自启项
+python -m app.main --create-shortcut   # 只创建桌面快捷方式
+python -m app.main --remove-shortcut   # 删除桌面快捷方式
 ```
 
-写入位置：
+自启项写入位置：
 
 ```text
 HKCU\Software\Microsoft\Windows\CurrentVersion\Run
   2.4G-Hardware-Viewer = "<pythonw.exe>" "<项目>\launch.pyw"
 ```
 
-使用 `pythonw.exe`，开机时不会弹出控制台窗口。
+桌面快捷方式指向同一个 `pythonw.exe + launch.pyw`，工作目录为项目根目录。两者都使用 `pythonw.exe`，启动时不弹控制台窗口。
+
+> 程序带单实例保护：登录自启后再手动双击快捷方式，第二个进程会直接退出并打印 `already running`，不会出现两个浮窗或两套 HID 监听线程。
 
 ## 技术框架
 
@@ -75,7 +80,8 @@ app/
   device_discovery.py   Windows 设备发现
   battery_protocols.py  厂商电量协议解析
   hotkey.py             Win32 全局快捷键
-  autostart.py          开机自启项读写
+  autostart.py          开机自启项与桌面快捷方式
+  single_instance.py    单实例互斥锁
   hid_inventory.py      HID 接口枚举与诊断（工具）
   feature_log.py        Feature Report 长时记录（工具）
 launch.pyw              自启动用的无控制台入口
@@ -113,10 +119,16 @@ requirements.txt
 - 通过 `RegisterHotKey` 注册系统级 hotkey，`QAbstractNativeEventFilter` 接收 `WM_HOTKEY`
 - 默认绑定 `Ctrl + Alt + B`，用于切换迷你/完整界面
 
-### `app/autostart.py` — 开机自启
+### `app/autostart.py` — 开机自启与快捷方式
 
 - 读写当前用户 `Run` 项，命令指向 `pythonw.exe` + `launch.pyw`
+- `create_desktop_shortcut()` 通过 `WScript.Shell` 生成 `.lnk`，工作目录指向项目根目录
 - 提供安装、移除、读取三种操作
+
+### `app/single_instance.py` — 单实例保护
+
+- 用命名互斥量（`CreateMutexW` + `ERROR_ALREADY_EXISTS`）判断是否已有实例
+- 登录自启与手动双击同时发生时，第二个进程直接退出，避免两套 HID 监听争用同一句柄
 
 ### `app/hid_inventory.py` — HID 诊断工具
 

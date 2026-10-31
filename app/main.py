@@ -19,7 +19,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .autostart import install_autostart, remove_autostart
+from .autostart import (
+    create_desktop_shortcut,
+    install_autostart,
+    remove_autostart,
+    remove_desktop_shortcut,
+)
+from .single_instance import acquire_single_instance
 from .battery_protocols import (
     KEYBOARD_PRODUCT_ID,
     KEYBOARD_VENDOR_ID,
@@ -780,6 +786,20 @@ def main() -> int:
         return 0
     if "--remove-autostart" in sys.argv:
         print("已取消开机自启" if remove_autostart() else "当前没有开机自启项")
+        return 0
+    if "--create-shortcut" in sys.argv:
+        print(f"已创建桌面快捷方式：{create_desktop_shortcut()}")
+        return 0
+    if "--remove-shortcut" in sys.argv:
+        print("已删除桌面快捷方式" if remove_desktop_shortcut() else "桌面没有快捷方式")
+        return 0
+    if "--setup" in sys.argv:
+        print(f"开机自启：{install_autostart()}")
+        print(f"桌面快捷方式：{create_desktop_shortcut()}")
+        return 0
+
+    if not acquire_single_instance():
+        print("2.4G Hardware Viewer is already running.")
         return 0
 
     app = QApplication(sys.argv)
