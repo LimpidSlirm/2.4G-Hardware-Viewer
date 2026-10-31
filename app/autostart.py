@@ -6,6 +6,8 @@ import sys
 import winreg
 from pathlib import Path
 
+from .winproc import NO_WINDOW
+
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 VALUE_NAME = "2.4G-Hardware-Viewer"
 
@@ -90,6 +92,7 @@ $lnk.Save()
         encoding="utf-8",
         errors="replace",
         timeout=30,
+        creationflags=NO_WINDOW,
     )
     if completed.returncode != 0 or not target.exists():
         raise RuntimeError(completed.stderr.strip() or "快捷方式创建失败")

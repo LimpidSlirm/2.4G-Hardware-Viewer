@@ -5,6 +5,8 @@ import subprocess
 from dataclasses import dataclass
 from typing import Any
 
+from .winproc import NO_WINDOW
+
 
 @dataclass(frozen=True)
 class DeviceRecord:
@@ -130,6 +132,7 @@ def discover_devices() -> list[DeviceRecord]:
             encoding="utf-8",
             errors="replace",
             timeout=10,
+            creationflags=NO_WINDOW,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise DeviceDiscoveryError(f"Unable to query Windows devices: {exc}") from exc
