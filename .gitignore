@@ -15,3 +15,5 @@ dist/
 # Feature Report logging output
 keyboard1_feature_log.csv
 _test_log.csv
+# Remembered window position
+.window_state.json

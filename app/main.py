@@ -26,6 +26,7 @@ from .autostart import (
     remove_desktop_shortcut,
 )
 from .single_instance import acquire_single_instance
+from .settings import clear_window_state, load_window_state, save_window_state
 from .battery_protocols import (
     KEYBOARD_PRODUCT_ID,
     KEYBOARD_VENDOR_ID,
@@ -746,7 +747,12 @@ class OverlayWindow(QWidget):
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         self._drag_offset = None
+        self._persist_position()
         super().mouseReleaseEvent(event)
+
+    def _persist_position(self) -> None:
+        point = self.frameGeometry().topLeft()
+        save_window_state(point.x(), point.y(), self._compact)
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
@@ -756,6 +762,7 @@ class OverlayWindow(QWidget):
         super().mouseDoubleClickEvent(event)
 
     def closeEvent(self, event) -> None:
+        self._persist_position()
         self._refresh_timer.stop()
         self._mouse_watch.stop()
         if self._discovery_thread is not None and self._discovery_thread.isRunning():
@@ -780,6 +787,25 @@ class OverlayWindow(QWidget):
         super().keyPressEvent(event)
 
 
+def _restore_position(window: "OverlayWindow", app: QApplication) -> None:
+    """Place the window where it was left, if that spot still exists."""
+    state = load_window_state()
+    if state is not None:
+        point = QPoint(state.x, state.y)
+        for screen in app.screens():
+            geometry = screen.availableGeometry()
+            # Keep the top-left corner reachable: a saved spot on a monitor that
+            # has since been unplugged would otherwise park the window off-screen.
+            if geometry.contains(point):
+                window.move(point)
+                if state.compact != window._compact:
+                    window._compact = state.compact
+                    window._apply_mode()
+                return
+    position = app.primaryScreen().availableGeometry().topLeft() + QPoint(40, 40)
+    window.move(position)
+
+
 def main() -> int:
     if "--install-autostart" in sys.argv:
         print(f"已设置开机自启：{install_autostart()}")
@@ -797,6 +823,9 @@ def main() -> int:
         print(f"开机自启：{install_autostart()}")
         print(f"桌面快捷方式：{create_desktop_shortcut()}")
         return 0
+    if "--reset-position" in sys.argv:
+        print("已清除记住的窗口位置" if clear_window_state() else "没有记住的位置")
+        return 0
 
     if not acquire_single_instance():
         print("2.4G Hardware Viewer is already running.")
@@ -806,9 +835,7 @@ def main() -> int:
     start_mouse_listener()
     start_keyboard_listener()
     window = OverlayWindow()
-    available_geometry = app.primaryScreen().availableGeometry()
-    position = available_geometry.topLeft() + QPoint(40, 40)
-    window.move(position)
+    _restore_position(window, app)
     window.show()
 
     hotkey = GlobalHotkey(

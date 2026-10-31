@@ -7,6 +7,8 @@ Windows 桌面浮层工具，实时查看已连接的 2.4G / USB / 蓝牙外设�
 ## 功能
 
 - 透明、无边框、置顶浮层，可拖动到任意位置
+- 自动记住窗口位置与迷你/完整模式，重启后回到上次的位置
+- 保存的位置若已不在任何屏幕内（例如拔掉副屏），自动回退到默认位置，不会跑到屏幕外
 - 默认以迷你电量窗启动（约 210 px 宽），只显示键盘与鼠标电量条
 - `Ctrl + Alt + B` 全局快捷键或双击迷你窗，切换到完整界面，再按一次回到迷你窗
 - 完整界面按 `音频设备` / `键盘` / `鼠标` 三类分组展示
@@ -42,6 +44,7 @@ python -m app.main --install-autostart # 只写入自启项
 python -m app.main --remove-autostart  # 移除自启项
 python -m app.main --create-shortcut   # 只创建桌面快捷方式
 python -m app.main --remove-shortcut   # 删除桌面快捷方式
+python -m app.main --reset-position    # 清除记住的窗口位置
 ```
 
 自启项写入位置：
@@ -82,6 +85,7 @@ app/
   hotkey.py             Win32 全局快捷键
   autostart.py          开机自启项与桌面快捷方式
   single_instance.py    单实例互斥锁
+  settings.py           窗口位置记忆
   hid_inventory.py      HID 接口枚举与诊断（工具）
   feature_log.py        Feature Report 长时记录（工具）
 launch.pyw              自启动用的无控制台入口
@@ -129,6 +133,12 @@ requirements.txt
 
 - 用命名互斥量（`CreateMutexW` + `ERROR_ALREADY_EXISTS`）判断是否已有实例
 - 登录自启与手动双击同时发生时，第二个进程直接退出，避免两套 HID 监听争用同一句柄
+
+### `app/settings.py` — 窗口位置记忆
+
+- 拖动结束与关闭窗口时把窗口左上角坐标和迷你/完整模式写入 `.window_state.json`
+- 启动时读回；若该坐标不在任何屏幕的可用范围内（例如副屏被拔掉），回退到默认位置
+- 状态文件已在 `.gitignore` 中排除，`--reset-position` 可手动清除
 
 ### `app/hid_inventory.py` — HID 诊断工具
 
