@@ -9,7 +9,7 @@ build/
 dist/
 *.egg-info/
 # Local development log (never push)
-20261030-Hardware-Viewer.md
+20*-Hardware-Viewer.md
 # Runtime battery cache
 .mouse_battery_cache.json
 # Feature Report logging output
