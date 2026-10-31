@@ -25,7 +25,12 @@ from .autostart import (
     remove_autostart,
     remove_desktop_shortcut,
 )
-from .single_instance import acquire_single_instance
+from .single_instance import (
+    acquire_single_instance,
+    clear_reveal_request,
+    request_reveal,
+    take_reveal_request,
+)
 from .settings import clear_window_state, load_window_state, save_window_state
 from .battery_protocols import (
     KEYBOARD_PRODUCT_ID,
@@ -313,6 +318,10 @@ class OverlayWindow(QWidget):
             # the taskbar button area and out of Alt+Tab.
             | Qt.WindowType.Tool
         )
+        # Qt.Tool windows default to WA_QuitOnClose = False, so closing the
+        # overlay left a headless process holding the single-instance slot and
+        # every later launch looked like it did nothing.
+        self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setWindowOpacity(self._opacity)
         self._compact = True
@@ -329,7 +338,16 @@ class OverlayWindow(QWidget):
         self._mouse_watch = QTimer(self)
         self._mouse_watch.timeout.connect(self._watch_mouse_reading)
         self._mouse_watch.start(3000)
+        # A second launch writes a small marker file instead of talking over IPC;
+        # polling it here is enough and cannot get stuck mid-handshake.
+        self._reveal_watch = QTimer(self)
+        self._reveal_watch.timeout.connect(self._watch_reveal_request)
+        self._reveal_watch.start(800)
         self.refresh_devices()
+
+    def _watch_reveal_request(self) -> None:
+        if take_reveal_request():
+            self.reveal()
 
     def _watch_mouse_reading(self) -> None:
         status = read_mouse_battery(timeout_seconds=0.0)
@@ -750,6 +768,15 @@ class OverlayWindow(QWidget):
         self._persist_position()
         super().mouseReleaseEvent(event)
 
+    def reveal(self) -> None:
+        """Show the overlay and bring it to the front (used by a second launch)."""
+        if not self.isVisible():
+            self.show()
+        if self.isMinimized():
+            self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
     def _persist_position(self) -> None:
         point = self.frameGeometry().topLeft()
         save_window_state(point.x(), point.y(), self._compact)
@@ -765,6 +792,7 @@ class OverlayWindow(QWidget):
         self._persist_position()
         self._refresh_timer.stop()
         self._mouse_watch.stop()
+        self._reveal_watch.stop()
         if self._discovery_thread is not None and self._discovery_thread.isRunning():
             self._discovery_thread.wait(11000)
         event.accept()
@@ -827,11 +855,13 @@ def main() -> int:
         print("已清除记住的窗口位置" if clear_window_state() else "没有记住的位置")
         return 0
 
-    if not acquire_single_instance():
-        print("2.4G Hardware Viewer is already running.")
-        return 0
-
     app = QApplication(sys.argv)
+    if not acquire_single_instance():
+        # Hand the request to the running instance and leave; otherwise a second
+        # click on the shortcut would appear to do nothing at all.
+        request_reveal()
+        return 0
+    clear_reveal_request()
     start_mouse_listener()
     start_keyboard_listener()
     window = OverlayWindow()
