@@ -67,6 +67,7 @@ def create_desktop_shortcut() -> Path:
     target = desktop_shortcut_path()
     icon_source = _pythonw_path()
     script = f"""
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ws = New-Object -ComObject WScript.Shell
 $lnk = $ws.CreateShortcut('{target}')
 $lnk.TargetPath = '{_pythonw_path()}'

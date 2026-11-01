@@ -106,6 +106,8 @@ requirements.txt
 ### `app/device_discovery.py` — 设备发现
 
 - 调用 PowerShell 查询 `AudioEndpoint`、`Keyboard`、`Mouse` 三类 PnP 设备
+- 子进程用 `CREATE_NO_WINDOW` 启动以免弹出控制台窗口；这会让 PowerShell 失去控制台、退回到 ANSI 代码页，
+  因此脚本开头显式执行 `[Console]::OutputEncoding = UTF8`，与 Python 侧的 UTF-8 解码保持一致
 - `DeviceRecord` 数据模型：类别、名称、状态、实例 ID、电量
 - 派生属性 `transport`（USB / HID / 蓝牙 / Windows 音频端点）与 `vid_pid`
 - 过滤内置键盘与麦克风阵列，并对同一物理设备的多接口条目去重

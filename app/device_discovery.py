@@ -50,6 +50,9 @@ class DeviceDiscoveryError(RuntimeError):
 
 
 _POWERSHELL_SCRIPT = """
+# CONIN$/CONOUT$ are detached by CREATE_NO_WINDOW, so PowerShell falls back to
+# the ANSI code page for stdout. Pin it to UTF-8 to match the decoder below.
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $classes = @('AudioEndpoint', 'Keyboard', 'Mouse')
 $devices = Get-PnpDevice -PresentOnly |
     Where-Object { $_.Class -in $classes } |
