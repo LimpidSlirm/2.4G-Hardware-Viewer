@@ -37,7 +37,6 @@ from .battery_protocols import (
     KEYBOARD_VENDOR_ID,
     read_keyboard_battery,
     read_mouse_battery,
-    read_vendor_battery_candidates,
     start_keyboard_listener,
     start_mouse_listener,
     stop_keyboard_listener,
@@ -146,13 +145,6 @@ class DeviceDiscoveryThread(QThread):
         try:
             devices = discover_devices()
             readings: dict[str, list[tuple[str, int, str]]] = {}
-
-            for reading in read_vendor_battery_candidates():
-                key = f"{reading.vendor_id:04X}:{reading.product_id:04X}"
-                readings.setdefault(key, []).append(
-                    ("键盘", reading.values[0], "厂商 Feature Report（候选）")
-                )
-                break
 
             keyboard_battery = read_keyboard_battery()
             if keyboard_battery is not None:

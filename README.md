@@ -112,7 +112,6 @@ requirements.txt
 
 ### `app/battery_protocols.py` — 电量协议
 
-- `read_vendor_battery_candidates()`：读取键盘接收器 `3554:FA09` 的 Feature Report 6
 - `parse_keyboard_battery()`：取 `0C45:FEFE` 类型 `0x10` 厂商报文的 `[26]` 作为电量
 - `read_keyboard_battery()`：返回最近 5 次读数的中位数，带落盘缓存以应对空闲期
 - `parse_rapoo_status()`：解析鼠标状态报告，并用 DPI 双轴做偏移自校验
@@ -150,9 +149,8 @@ requirements.txt
 
 ### `app/feature_log.py` — Feature Report 长时记录
 
-`3554:FA09` 的 Feature Report 6 目前读作 `[6, 0, 2, 100, 100, 100, 53, 21]`，
-但满电时所有候选值都是 100，无法判断哪个字节才是电量。该工具定期采样并追加到 CSV，
-等电量明显下降后对比各行即可定位。
+`3554:FA09` 的 Feature Report 6 读作 `[6, 0, 2, 100, 100, 100, 53, 21]`。该工具定期采样并追加到 CSV，
+用于在电量变化后对比各行、判断是否有字节随之改变。实测结论见「已知限制」：该报告不是电量通道。
 
 ```powershell
 python -m app.feature_log                        # 每 60 秒采样，Ctrl+C 结束
@@ -171,7 +169,6 @@ python -m app.feature_log --count 10             # 只采 10 次
         ▼
 DeviceDiscoveryThread (QThread)
         │  discover_devices()        → PowerShell → PnP 设备列表
-        │  read_vendor_battery_candidates() → 3554:FA09 Feature Report 6
         │  read_keyboard_battery()   → 0C45:FEFE 类型 0x10 广播 [26]（中位数）
         │  read_mouse_battery()      → 24AE:1411 Input Report 7
         │  _merge_by_device()        → 按 VID:PID 合并各 HID 集合
@@ -199,7 +196,7 @@ start_keyboard_listener()  → 0C45:FEFE 0xFF60/0x61 阻塞读
 
 | 设备 | VID:PID | 读取方式 | 字段 |
 | --- | --- | --- | --- |
-| 无线键盘接收器 | `3554:FA09` | Feature Report 6（只读） | 字节 `[3..5]` 为候选电量，当前三个值均一致 |
+| 无线键盘接收器 | `3554:FA09` | 无可用通道 | 界面标注 `电量未公开`，不显示猜测值 |
 | 无线键盘（狼蛛 AULA MINI 60 HE PRO） | `0C45:FEFE` | 监听 `0xFF60` 广播（被动） | 类型 `0x10` 报文的 `[26]`，中位数平滑 |
 | 无线鼠标 | `24AE:1411` | Input Report 7（被动接收） | `[7]` 状态标志、`[8]` 电量百分比 |
 
@@ -262,8 +259,24 @@ pywinusb
 - 键盘的厂商广播是突发式的，空闲时可能静默数分钟，同样依赖缓存显示
 - 读数缓存写入项目根目录的 `.mouse_battery_cache.json`（已在 `.gitignore` 中排除），重启后可立即恢复上次读数
 - 键盘电量的原始字段抖动约 ±4，中位数平滑会让数值变化略滞后于真实电量
-- 键盘报告的三个候选字节尚未逐字节独立验证，界面标注为“候选”
-- `3554:FA09` 不主动广播任何报文（`0xFF02/0x02` 监听 40 秒为 0 条），只能靠 Feature Report 主动拉取，因此键盘2 那套被动监听方案不适用于它
+- `3554:FA09`（无线键盘接收器）读不到电量：Feature Report 6 是可写配置寄存器而非查询接口，`0xFF02` 的 Output Report 全部拒收，也没有暴露标准 HID Battery Strength（Usage Page `0x06`）。详见下节
 - 不解析 2.4G 空中数据包
 - 程序正式代码全程只读：不发送 Output Report 或 Feature Report 写命令，不读取键盘按键内容或鼠标移动轨迹
 - 逆向阶段曾用临时脚本向设备发过探测包（含全零包与 VIA 标准查询），这些脚本未进入代码库，详见开发日志
+
+## 为什么 `3554:FA09` 读不到电量
+
+这块键盘接收器曾被当成「能读电量但字段未确认」的设备，界面显示 100%。2026-10-31 至 11-01 的实测否定了这个假设，三条通道逐一排除：
+
+| 通道 | 实测结果 |
+| --- | --- |
+| Feature Report 6（`0xFF04/0x02`，8 字节） | 268 次采样、38.6 小时、**只有 1 种报文**，8 个字节全部恒定：`[6, 0, 2, 100, 100, 100, 53, 21]` |
+| 写入同一 Report 6 | `byte1` 写什么读回什么（可写寄存器），`byte2` 写不进去（只读状态位），证明是配置块而非查询接口 |
+| Output Report（`0xFF02/0x02`，20 字节） | Report ID `0~8` 全部拒绝：`0,1,2,8` 报 `ERROR_INVALID_PARAMETER(87)`，`3~7` 报 `ERROR_INVALID_FUNCTION(1)`；`HidD_SetOutputReport` 与 `WriteFile` 结果一致 |
+| 标准 HID Battery Strength | 设备没有暴露 Usage Page `0x06` / Usage `0x20`，Windows 自身也无从得知 |
+
+关键判据：采样期间这块键盘**一直在使用**（用户确认正在用它打字），而 `byte3/4/5` 三个候选字节始终恰好 100、`byte6=53`、`byte7=21` 也分毫不动。真实电量计在 38 小时内不可能一位不漂。
+
+结论：`100` 是固件写死的值或配置项，不是电量。因此已删除 `read_vendor_battery_candidates()`，界面改为标注 `电量未公开`，不再显示伪造百分比。
+
+`app/feature_log.py` 保留作为通用诊断工具，可对任意 Feature Report 做长时记录与前后对比。
